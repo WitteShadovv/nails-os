@@ -1,0 +1,59 @@
+name: Build NAILS OS ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        type: string
+      release_name:
+        description: "Release name"
+        required: false
+        default: "NAILS OS ISO"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v12
+
+      - name: Build ISO
+        run: |
+          nix --version
+          nix build ./nix-config#nails-os-iso
+          ls -l result/iso
+
+      - name: Collect ISO
+        run: |
+          mkdir -p dist
+          cp result/iso/*.iso dist/
+
+      - name: Generate SHA256
+        run: |
+          cd dist
+          sha256sum *.iso > SHA256SUMS
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nails-os-iso
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.release_name }}
+          files: |
+            dist/*.iso
+            dist/SHA256SUMS
