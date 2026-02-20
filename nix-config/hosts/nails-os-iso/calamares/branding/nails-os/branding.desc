@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: CC0-1.0
+---
+componentName: nails-os
+
+### WELCOME / OVERALL WORDING
+
+welcomeStyleCalamares: false
+welcomeExpandingLogo:  true
+
+### WINDOW
+
+windowExpanding:  normal
+windowSize:       800px,520px
+windowPlacement:  center
+
+### PANELS
+
+sidebar:    widget
+navigation: widget
+
+### STRINGS, IMAGES AND COLORS
+
+images:
+    productIcon:    "logo.png"
+    productLogo:    "logo.png"
+    productWelcome: "logo.png"
+
+strings:
+    productName:         "NAILS OS"
+    shortProductName:    "NAILS OS"
+    version:             ""
+    shortVersion:        ""
+    versionedName:       "NAILS OS"
+    shortVersionedName:  "NAILS OS"
+    bootloaderEntryName: "NAILS OS"
+    productUrl:          "https://github.com/witteshadovv/nails-os"
+    supportUrl:          "https://github.com/witteshadovv/nails-os/issues"
+    knownIssuesUrl:      "https://github.com/witteshadovv/nails-os/issues"
+    releaseNotesUrl:     ""
+    donateUrl:           ""
+
+
+style:
+    SidebarBackground:        "#1a1a2e"
+    SidebarText:              "#e0e0e0"
+    SidebarTextCurrent:       "#ffffff"
+    SidebarBackgroundCurrent: "#16213e"
+
+### SLIDESHOW
+
+slideshow:    "show.qml"
+slideshowAPI: 2
+
+uploadServer:
+    type:      "none"
+    url:       ""
+    sizeLimit: -1

@@ -1,8 +1,6 @@
-{ lib, ... }: {
-  boot.initrd.luks.devices = {
-    persist = {
-      device = lib.mkDefault "/dev/disk/by-uuid/CHANGE-ME-PERSIST";
-      preLVM = true;
-    };
-  };
+_:
+{
+  # LUKS device is declared in hardware-configuration.nix by the installer,
+  # which writes the real partition UUID detected at install time.
+  # Nothing to declare here; the entry point is hardware-configuration.nix.
 }

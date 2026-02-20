@@ -10,7 +10,7 @@
         isNormalUser = true;
         description = "Amnesia";
         home = "/home/amnesia";
-        extraGroups = [ "networkmanager" "video" "audio" ];
+        extraGroups = [ "wheel" "networkmanager" "video" "audio" ];
       };
 
       clearnet = {

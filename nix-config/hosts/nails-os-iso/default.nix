@@ -1,175 +1,48 @@
-{ pkgs, modulesPath, ... }:
+{ pkgs, lib, modulesPath, ... }:
 let
-  nixConfig = builtins.path {
-    path = ../..;
-    name = "nix-config";
+  # ---------------------------------------------------------------------------
+  # Our Calamares extensions (module + branding + config), built as a
+  # derivation so everything lives in the Nix store (immutable, no /etc magic).
+  # ---------------------------------------------------------------------------
+  nailsCalamaresExtensions = pkgs.stdenv.mkDerivation {
+    pname = "nails-os-calamares-extensions";
+    version = "1";
+    src = ./calamares;
+
+    installPhase = ''
+      runHook preInstall
+
+      # Python exec module  →  $out/lib/calamares/modules/nails-os/
+      mkdir -p $out/lib/calamares/modules/nails-os
+      cp -r modules/nails-os/. $out/lib/calamares/modules/nails-os/
+
+      # Branding  →  $out/share/calamares/branding/nails-os/
+      mkdir -p $out/share/calamares/branding/nails-os
+      cp -r branding/nails-os/. $out/share/calamares/branding/nails-os/
+
+      # Icon  →  hicolor theme so desktop files can reference Icon=nails-os
+      mkdir -p $out/share/icons/hicolor/256x256/apps
+      cp branding/nails-os/logo.png $out/share/icons/hicolor/256x256/apps/nails-os.png
+
+      # Config  →  $out/etc/calamares/{settings.conf,modules/}
+      mkdir -p $out/etc/calamares/modules
+      cp config/settings.conf  $out/etc/calamares/settings.conf
+      cp config/modules/*.conf $out/etc/calamares/modules/
+
+      # Bake the upstream extensions store path and our own store path into
+      # settings.conf so Calamares can find both module trees.
+      substituteInPlace $out/etc/calamares/settings.conf \
+        --replace-fail "@calamares_nixos_extensions@" \
+          "${pkgs.calamares-nixos-extensions}" \
+        --replace-fail "@out@" "$out"
+
+      runHook postInstall
+    '';
   };
-  oneClickInstall = pkgs.writeShellScriptBin "nails-os-one-click-install" ''
-        set -euo pipefail
 
-        if [ "$(id -u)" -ne 0 ]; then
-          exec sudo -E "$0" "$@"
-        fi
-
-        display=$(printenv DISPLAY || true)
-        if [ -n "$display" ] && command -v zenity >/dev/null 2>&1; then
-          zenity --warning --width=600 --text="DANGER: THIS WILL ERASE A DISK\n\nThis installer will DELETE ALL DATA on the selected disk.\nMake sure you have backups. There is NO UNDO."
-
-          mapfile -t disks < <(lsblk -dn -o NAME,SIZE,MODEL,TYPE | awk '$4=="disk"{print $1 "|" $2 "|" $3}')
-          if [ "''${#disks[@]}" -eq 0 ]; then
-            zenity --error --text="No disks found."
-            exit 1
-          fi
-
-          args=()
-          for entry in "''${disks[@]}"; do
-            IFS="|" read -r name size model <<<"$entry"
-            args+=(FALSE "/dev/$name" "$size" "$model")
-          done
-
-          disk=$(zenity --list --radiolist --width=700 --height=400 \
-            --title="Select target disk (WILL ERASE)" \
-            --column="Pick" --column="Disk" --column="Size" --column="Model" \
-            "''${args[@]}") || exit 1
-
-          confirm=$(zenity --entry --width=600 \
-            --text="Type 'ERASE $disk' to confirm you want to wipe this disk:" ) || exit 1
-          if [ "$confirm" != "ERASE $disk" ]; then
-            zenity --info --text="Aborted."
-            exit 1
-          fi
-
-          final=$(zenity --entry --width=600 \
-            --text="Last chance. Type 'INSTALL' to proceed with erasing $disk:" ) || exit 1
-          if [ "$final" != "INSTALL" ]; then
-            zenity --info --text="Aborted."
-            exit 1
-          fi
-
-          pass1=$(zenity --password --width=400 --text="Set LUKS passphrase (used for /nix and /persist):") || exit 1
-          pass2=$(zenity --password --width=400 --text="Confirm LUKS passphrase:") || exit 1
-          if [ "$pass1" != "$pass2" ]; then
-            zenity --error --text="Passphrases do not match."
-            exit 1
-          fi
-
-          userpass1=$(zenity --password --width=400 --text="Set login password for user 'amnesia':") || exit 1
-          userpass2=$(zenity --password --width=400 --text="Confirm login password:") || exit 1
-          if [ -z "$userpass1" ] || [ "$userpass1" != "$userpass2" ]; then
-            zenity --error --text="User passwords do not match or are empty."
-            exit 1
-          fi
-        else
-          echo "GUI not available; falling back to terminal prompts."
-          echo "DANGER: THIS WILL ERASE A DISK"
-          echo "This installer will DELETE ALL DATA on the selected disk."
-          echo "Make sure you have backups. There is NO UNDO."
-          echo
-          lsblk -d -o NAME,SIZE,MODEL,TYPE
-          echo
-          read -r -p "Enter target disk (e.g., /dev/sda or /dev/nvme0n1): " disk
-
-          if ! lsblk -dn -o TYPE "$disk" 2>/dev/null | grep -qx "disk"; then
-            echo "ERROR: '$disk' is not a disk device."
-            exit 1
-          fi
-
-          echo
-          read -r -p "Type 'ERASE $disk' to confirm: " confirm
-          if [ "$confirm" != "ERASE $disk" ]; then
-            echo "Aborted."
-            exit 1
-          fi
-
-          echo
-          echo "About to erase $disk and install NAILS OS."
-          read -r -p "Last chance. Type 'INSTALL' to proceed: " final
-          if [ "$final" != "INSTALL" ]; then
-            echo "Aborted."
-            exit 1
-          fi
-
-          echo "Set LUKS passphrase (used for both /nix and /persist):"
-          read -r -s -p "Passphrase: " pass1; echo
-          read -r -s -p "Confirm: " pass2; echo
-          if [ "$pass1" != "$pass2" ]; then
-            echo "ERROR: passphrases do not match."
-            exit 1
-          fi
-
-          echo "Set login password for user 'amnesia':"
-          read -r -s -p "Password: " userpass1; echo
-          read -r -s -p "Confirm: " userpass2; echo
-          if [ -z "$userpass1" ] || [ "$userpass1" != "$userpass2" ]; then
-            echo "ERROR: user passwords do not match or are empty."
-            exit 1
-          fi
-        fi
-
-        echo "Wiping partition table on $disk..."
-        wipefs -a "$disk"
-        sgdisk --zap-all "$disk"
-
-        echo "Partitioning..."
-        parted -s "$disk" mklabel gpt
-        parted -s "$disk" mkpart ESP fat32 1MiB 513MiB
-        parted -s "$disk" set 1 esp on
-        parted -s "$disk" mkpart persist 513MiB 100%
-
-        if echo "$disk" | grep -Eq 'nvme|mmcblk'; then
-          p1="$disk"p1
-          p2="$disk"p2
-        else
-          p1="$disk"1
-          p2="$disk"2
-        fi
-
-        echo "Creating filesystems..."
-        mkfs.fat -F 32 -n EFI "$p1"
-
-        printf "%s" "$pass1" | cryptsetup luksFormat "$p2" -
-        printf "%s" "$pass1" | cryptsetup open "$p2" persist -
-        unset pass1 pass2
-
-        mkfs.ext4 -L persist /dev/mapper/persist
-
-        echo "Mounting target..."
-        mount /dev/mapper/persist /mnt
-        mkdir -p /mnt/nix /mnt/boot
-        mount "$p1" /mnt/boot
-
-        echo "Preparing flake for install..."
-        rm -rf /root/nix-config
-        mkdir -p /root/nix-config
-        cp -aL /etc/nixos/. /root/nix-config/
-        mkdir -p /root/nix-config/modules/secrets
-
-        userhash=$(printf "%s" "$userpass1" | openssl passwd -6 -stdin)
-        printf "%s" "$userhash" > /root/nix-config/modules/secrets/amnesia.passwd
-        chmod 600 /root/nix-config/modules/secrets/amnesia.passwd
-        cat > /root/nix-config/modules/secrets.nix <<'EOF'
-    { ... }:
-    {
-      users.users.amnesia.hashedPasswordFile = ./secrets/amnesia.passwd;
-    }
-    EOF
-        chmod 600 /root/nix-config/modules/secrets.nix
-        unset userpass1 userpass2 userhash
-
-        echo "Generating hardware config..."
-        nixos-generate-config --root /mnt
-        cp /mnt/etc/nixos/hardware-configuration.nix /root/nix-config/hosts/nails-os/hardware-configuration.nix
-        mkdir -p /mnt/etc/nixos
-        cp -a /root/nix-config/. /mnt/etc/nixos/
-
-        echo "Installing NAILS OS..."
-        nixos-install --flake /root/nix-config#nails-os --no-root-passwd
-
-        echo "Install complete. Reboot and remove the ISO."
-  '';
 in {
   imports = [
-    "${modulesPath}/installer/cd-dvd/installation-cd-graphical-gnome.nix"
+    "${modulesPath}/installer/cd-dvd/installation-cd-graphical-calamares-gnome.nix"
     ../../modules/base.nix
     ../../modules/security.nix
     ../../modules/packages.nix
@@ -177,51 +50,152 @@ in {
     ../../modules/home.nix
   ];
 
-  # ISO specifics
+  # ---------------------------------------------------------------------------
+  # ISO image settings
+  # ---------------------------------------------------------------------------
   image.fileName = "nails-os-installer.iso";
-  isoImage.makeEfiBootable = true;
-  isoImage.makeUsbBootable = true;
+  isoImage = {
+    edition = lib.mkForce "nails-os";
+    makeEfiBootable = true;
+    makeUsbBootable = true;
+  };
 
   networking.hostName = "nails-installer";
 
-  # Provide the full flake config on the ISO for installation.
-  environment = {
-    etc = {
-      "nixos".source = nixConfig;
-      "nixos-installer-readme.txt".text = ''
-        NAILS OS installer ISO
+  # Forward kernel messages to serial so we can observe boot/hang in VMs.
+  boot.kernelParams = [ "console=ttyS0,115200" "console=tty1" ];
 
-        Install with:
-          1) Partition and mount your target to /mnt
-          2) nixos-generate-config --root /mnt
-          3) cp /mnt/etc/nixos/hardware-configuration.nix /etc/nixos/hosts/nails-os/hardware-configuration.nix
-          4) nixos-install --flake /etc/nixos#nails-os
+  # Disable nix channel initialisation — we are flake-based and the channel
+  # setup produces spurious symlink errors on the live ISO.
+  system.installer.channel.enable = false;
+
+  # ---------------------------------------------------------------------------
+  # Make the NAILS OS flake available at /etc/nixos for nixos-install.
+  # We copy it at boot into the writable tmpfs /etc instead of using
+  # environment.etc, which would create a read-only store symlink that
+  # clone-config.nix then cannot write configuration.nix into.
+  # ---------------------------------------------------------------------------
+  boot.postBootCommands = lib.mkAfter ''
+    if ! [ -e /etc/nixos/flake.nix ]; then
+      cp -aL ${../..}/. /etc/nixos
+      chmod -R u+w /etc/nixos
+    fi
+  '';
+
+  # ---------------------------------------------------------------------------
+  # Replace pkgs.calamares-nixos with our wrapper via overlay so that the
+  # upstream autostart .desktop item (created by installation-cd-graphical-
+  # calamares.nix) automatically points at our wrapped binary.
+  # ---------------------------------------------------------------------------
+  nixpkgs.overlays = [
+    (_final: prev: {
+      # We must wrap the raw calamares ELF (prev.calamares) directly rather than
+      # layering on top of prev.calamares-nixos.  The upstream calamares-nixos
+      # wrapper hard-codes --prefix XDG_CONFIG_DIRS with the upstream extensions
+      # path; since --prefix *prepends*, any outer wrapper that also uses
+      # --prefix ends up second in the colon list.  Calamares picks the first
+      # settings.conf it finds via XDG_CONFIG_DIRS, so the upstream one always
+      # wins unless we take full ownership of the variable.
+      #
+      # Strategy: set XDG_CONFIG_DIRS to exactly "${ext}/etc:${upstream-ext}/etc"
+      # so our settings.conf is found first, then fall back to upstream modules.
+      # XDG_DATA_DIRS is additive (both sets of QML/branding assets are needed),
+      # so we keep --prefix there.
+      calamares-nixos = let
+        ext = nailsCalamaresExtensions;
+        upstExt = prev.calamares-nixos-extensions;
+        rawBin = "${prev.calamares}/bin/calamares";
+      in prev.runCommand "calamares-nails-wrapped" {
+        nativeBuildInputs = [ prev.makeWrapper ];
+      } ''
+        mkdir -p $out/bin
+        for i in $(ls ${prev.calamares-nixos}); do
+          if [ "$i" != "bin" ]; then
+            ln -s ${prev.calamares-nixos}/$i $out/$i
+          fi
+        done
+        makeWrapper ${rawBin} $out/bin/calamares \
+          --prefix XDG_DATA_DIRS   : "${upstExt}/share" \
+          --prefix XDG_DATA_DIRS   : "${ext}/share" \
+          --set    XDG_CONFIG_DIRS   "${ext}/etc:${upstExt}/etc" \
+          --add-flags "--xdg-config"
       '';
+    })
+  ];
 
-      "xdg/applications/nails-os-one-click-install.desktop".text = ''
-        [Desktop Entry]
-        Type=Application
-        Name=NAILS OS One-Click Install (ERASES DISK)
-        Exec=gnome-terminal -- nails-os-one-click-install
-        Icon=system-software-install
-        Categories=System;
-        Terminal=false
+  # Extra runtime tools used by our Python install module.
+  # Also include our extensions package so the nails-os icon is in the
+  # system icon search path (XDG_DATA_DIRS / icon theme).
+  environment.systemPackages = with pkgs; [
+    openssl
+    util-linux
+    nailsCalamaresExtensions
+  ];
+
+  # ---------------------------------------------------------------------------
+  # Calamares launcher script + desktop file overrides.
+  #
+  # Problem: pkexec core-dumps in this Wayland+VirtualBox environment.
+  # Falling back to "sudo -E" also fails because root cannot traverse
+  # /run/user/<uid>/ (mode 0700) to reach the Wayland socket.
+  #
+  # Solution:
+  #   • Install a small launcher script at /etc/calamares-launch that:
+  #       1. chmod o+x /run/user/<uid> — grants root traverse access to the
+  #          runtime dir (the socket itself is already world-readable: srwxr-xr-x)
+  #       2. Passes the required display env vars explicitly to sudo.
+  #   • Override the .desktop files (autostart + applications) to invoke the
+  #     script instead of pkexec.
+  #   • /etc/xdg is searched before /run/current-system/sw/etc/xdg so the
+  #     overrides win over the upstream read-only store symlinks.
+  # ---------------------------------------------------------------------------
+  environment.etc = {
+    "calamares-launch" = {
+      mode = "0755";
+      text = ''
+        #!/bin/sh
+        # Calamares launcher — elevate to root while keeping Wayland display.
+        uid=$(id -u)
+        runtime_dir="/run/user/$uid"
+        wayland_sock="''${WAYLAND_DISPLAY:-wayland-0}"
+        # Allow root to traverse the runtime dir so Qt can open the socket.
+        chmod o+x "$runtime_dir" 2>/dev/null || true
+        exec sudo \
+          WAYLAND_DISPLAY="$wayland_sock" \
+          XDG_RUNTIME_DIR="$runtime_dir" \
+          XDG_SESSION_TYPE="wayland" \
+          QT_QPA_PLATFORM="wayland" \
+          calamares
       '';
     };
-
-    systemPackages = with pkgs; [
-      oneClickInstall
-      cryptsetup
-      dosfstools
-      e2fsprogs
-      gptfdisk
-      openssl
-      parted
-      util-linux
-      zenity
-    ];
+    "xdg/autostart/calamares.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Version=1.0
+      Name=Install NAILS OS
+      GenericName=System Installer
+      Keywords=calamares;system;installer;
+      Exec=/etc/calamares-launch
+      Comment=Install NAILS OS to disk
+      Icon=nails-os
+      Terminal=false
+      StartupNotify=true
+      Categories=Qt;System;
+      X-KDE-autostart-phase=2
+    '';
+    "xdg/applications/calamares.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Version=1.0
+      Name=Install NAILS OS
+      GenericName=System Installer
+      Keywords=calamares;system;installer;
+      Exec=/etc/calamares-launch
+      Comment=Install NAILS OS to disk
+      Icon=nails-os
+      Terminal=false
+      StartupNotify=true
+      Categories=Qt;System;
+    '';
   };
-
-  # Live media already runs in a tmpfs/squashfs environment; no LUKS or /persist here.
-  # Persistence for ISO users can be added later if you want a dedicated persistence device.
 }

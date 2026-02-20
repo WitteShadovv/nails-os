@@ -7,10 +7,10 @@
   nixpkgs.config.allowUnfreePredicate = pkg:
     builtins.elem (lib.getName pkg) [ "veracrypt" ];
 
-  time.timeZone = "UTC";
+  time.timeZone = lib.mkDefault "UTC";
 
   i18n = {
-    defaultLocale = "en_US.UTF-8";
+    defaultLocale = lib.mkDefault "en_US.UTF-8";
     supportedLocales = [
       "C.UTF-8/UTF-8"
       "en_US.UTF-8/UTF-8"
@@ -38,7 +38,7 @@
   services = {
     xserver = {
       enable = true;
-      xkb.layout = "us";
+      xkb.layout = lib.mkDefault "us";
     };
     desktopManager.gnome.enable = true;
     displayManager.gdm.enable = true;

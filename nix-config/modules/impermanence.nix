@@ -1,25 +1,10 @@
-{ lib, ... }: {
+_: {
+  # systemd initrd is required for impermanence's pivot-root behaviour.
   boot.initrd.systemd.enable = true;
 
-  fileSystems = {
-    "/" = {
-      device = "tmpfs";
-      fsType = "tmpfs";
-      options = [ "mode=755" "size=4G" ];
-    };
-    "/persist" = {
-      device = lib.mkDefault "/dev/mapper/persist";
-      fsType = "ext4";
-      neededForBoot = true;
-    };
-    "/nix" = {
-      device = "/persist/nix";
-      fsType = "none";
-      options = [ "bind" ];
-      depends = [ "/persist" ];
-      neededForBoot = true;
-    };
-  };
+  # The actual fileSystems (tmpfs /, /persist, /nix bind) are declared in
+  # hardware-configuration.nix by the installer, which also supplies the real
+  # LUKS UUID.  We only declare the persistence binds here.
 
   environment.persistence."/persist" = {
     hideMounts = true;

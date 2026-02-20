@@ -1,0 +1,5 @@
+---
+type:       "job"
+name:       "nails-os"
+interface:  "python"
+script:     "main.py"

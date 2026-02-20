@@ -1,16 +1,23 @@
-_: {
+{ lib, ... }: {
   imports = [
     ./hardware-configuration.nix
-    ../../modules/base.nix
-    ../../modules/network.nix
-    ../../modules/security.nix
-    ../../modules/storage.nix
-    ../../modules/impermanence.nix
-    ../../modules/tor.nix
-    ../../modules/packages.nix
-    ../../modules/users.nix
-    ../../modules/home.nix
-  ];
+    # Written by the Calamares installer with the user-chosen hostname.
+    # Guarded by pathExists so the flake evaluates cleanly before installation.
+  ] ++ lib.optional (builtins.pathExists ./hostname.nix) ./hostname.nix
+    # Written by the Calamares installer with timezone/locale/keyboard settings.
+    # locale.nix always exists (stub provides UTC/us defaults).
+    ++ [ ./locale.nix ] ++ [
+      ../../modules/base.nix
+      ../../modules/network.nix
+      ../../modules/security.nix
+      ../../modules/boot.nix
+      ../../modules/storage.nix
+      ../../modules/impermanence.nix
+      ../../modules/tor.nix
+      ../../modules/packages.nix
+      ../../modules/users.nix
+      ../../modules/home.nix
+    ];
 
   boot = {
     loader = {
