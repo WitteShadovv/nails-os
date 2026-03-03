@@ -22,7 +22,12 @@ in {
       IsolateSOCKSAuth = true;
     }];
     TransPort = torTransPort;
-    DNSPort = torDNSPort;
+    # Bind DNSPort on two addresses:
+    #   - 8853: receives redirected app DNS via the nftables DNAT rule
+    #   - 53:   receives direct DNS from the Tor process itself (and its
+    #           child pluggable-transport processes such as snowflake-client)
+    #           which bypass the DNAT rule because they run as the tor uid.
+    DNSPort = [ { port = torDNSPort; } { port = 53; } ];
     AutomapHostsOnResolve = true;
     VirtualAddrNetworkIPv4 = "10.192.0.0/10";
     # Pluggable transports are available for when bridges are configured.
@@ -48,10 +53,11 @@ in {
             meta skuid $tor_uid return
             meta skuid $clearnet_uid return
 
+            udp dport 53 dnat to 127.0.0.1:${toString torDNSPort}
+
             ip daddr 127.0.0.0/8 return
             ip daddr ${rfc1918} return
 
-            udp dport 53 dnat to 127.0.0.1:${toString torDNSPort}
             ip protocol tcp dnat to 127.0.0.1:${toString torTransPort}
           }
         }

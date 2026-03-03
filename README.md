@@ -39,7 +39,7 @@ You can also install manually using the config embedded on the ISO:
 ```
 # Partition/mount target to /mnt, then:
 nixos-generate-config --root /mnt
-cp /mnt/etc/nixos/hardware-configuration.nix /etc/nixos/hosts/nails-os/hardware-configuration.nix
+cp /mnt/etc/nixos/hardware-configuration.nix /etc/nixos/hardware-configuration.nix
 nixos-install --flake /etc/nixos#nails-os
 ```
 
@@ -76,6 +76,8 @@ VeraCrypt is included and requires unfree allowance. This is handled in:
 ## Repo layout
 
 - `nix-config/flake.nix` - flake entry
+- `nix-config/hardware-configuration.nix` - hardware config (canonical path)
+- `nix-config/configuration.nix` - compatibility entry point
 - `nix-config/hosts/nails-os/` - installed system host config
 - `nix-config/hosts/nails-os-iso/` - installer ISO host config
 - `nix-config/modules/` - reusable modules

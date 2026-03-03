@@ -11,10 +11,17 @@ _: {
           "ethernet.cloned-mac-address" = "random";
         };
       };
+      # Do not let NetworkManager overwrite resolv.conf with DHCP-provided
+      # nameservers.  All DNS is handled by Tor's DNSPort; see tor.nix.
+      dns = "none";
     };
     dhcpcd.enable = false;
     enableIPv6 = false;
-    # Force local DNS usage; all DNS will be redirected to Tor's DNSPort.
+    # Point the system resolver at localhost.  App DNS queries to port 53
+    # are redirected by nftables to Tor's DNSPort on 8853.  Tor's own
+    # process (and child pluggable-transport processes such as
+    # snowflake-client) bypass that DNAT rule via the tor-uid exemption and
+    # reach Tor's DNSPort directly on port 53.
     nameservers = [ "127.0.0.1" ];
   };
   boot.kernel.sysctl = {

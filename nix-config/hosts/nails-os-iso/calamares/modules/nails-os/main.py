@@ -9,7 +9,7 @@
 #   2. Detects partition UUIDs (EFI, LUKS) from globalStorage + blkid.
 #      LUKS on the root partition is mandatory; the install is aborted if
 #      the user chose not to encrypt.
-#   3. Writes hosts/nails-os/hardware-configuration.nix with the real UUIDs
+#   3. Writes hardware-configuration.nix with the real UUIDs
 #      and the impermanence filesystem layout (tmpfs /, /persist, /nix bind).
 #   4. Writes hosts/nails-os/hostname.nix with the user-chosen hostname.
 #   5. Writes modules/secrets/<user>.passwd and modules/secrets.nix.
@@ -207,6 +207,26 @@ def get_initrd_modules():
         if mod not in modules:
             modules.append(mod)
     return sorted(set(modules))
+
+
+def read_uid_gid(root, username):
+    """Return (uid, gid) strings for *username* in the target root, or (None, None)."""
+    passwd_path = os.path.join(root, "etc", "passwd")
+    try:
+        with open(passwd_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line or line.startswith("#"):
+                    continue
+                if not line.startswith(username + ":"):
+                    continue
+                parts = line.strip().split(":")
+                if len(parts) >= 4:
+                    return parts[2], parts[3]
+    except Exception as ex:
+        libcalamares.utils.debug(
+            "read_uid_gid({}, {}) failed: {}".format(passwd_path, username, ex)
+        )
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -515,9 +535,7 @@ def run():
     libcalamares.utils.debug("initrd modules: {}".format(initrd_modules))
 
     hw_config = make_hardware_config(boot_uuid, luks_uuid, initrd_modules)
-    hw_dest = os.path.join(
-        target_nixos, "hosts", "nails-os", "hardware-configuration.nix"
-    )
+    hw_dest = os.path.join(target_nixos, "hardware-configuration.nix")
     try:
         write_file(hw_dest, hw_config)
     except RuntimeError as e:
@@ -636,32 +654,28 @@ def run():
     )
 
     # ------------------------------------------------------------------
-    # 6. Prepare the /persist directory tree and bind-mount /nix
+    # 6. Prepare the /persist directory tree
     #
-    # nixos-install writes to <root>/nix/store.  After reboot the initrd
-    # mounts the LUKS ext4 at /persist and then bind-mounts /persist/nix
-    # to /nix.  For this to work, /persist/nix must already exist on the
-    # ext4 AND the Nix store must be in /persist/nix/store on the ext4.
+    # Layout on the LUKS ext4 (mounted at <root> by Calamares):
     #
-    # Calamares mounts the opened LUKS ext4 at <root>.  We:
-    #   a. Create <root>/nix (will be the real /nix at runtime)
-    #   b. Create <root>/persist/nix (destination of bind)
-    #   c. Bind-mount <root>/nix -> <root>/persist/nix so nixos-install
-    #      writes to <root>/nix/store/... which lands in the ext4 at
-    #      the path /persist/nix/store/... (as seen after reboot).
+    #   <root>/                  ← ext4 root  =  /persist at runtime
+    #   <root>/nix/store/...     ← Nix store  =  /persist/nix/store at runtime
+    #                              (runtime /nix is a bind of /persist/nix)
+    #
+    # nixos-install writes directly to <root>/nix/store, which is already the
+    # correct physical location on the ext4.  No bind-mount is needed.
+    #
+    # persist_root == root because the ext4 IS the /persist volume — there is
+    # no "persist/" subdirectory on the ext4; the ext4 root itself is mounted
+    # at /persist at runtime.
     # ------------------------------------------------------------------
     status = _("Preparing filesystem layout")
     libcalamares.job.setprogress(0.40)
 
-    persist_root = os.path.join(root, "persist")
-    persist_nix = os.path.join(persist_root, "nix")
-    root_nix = os.path.join(root, "nix")
+    # The ext4 mount point IS the persist root at runtime.
+    persist_root = root
 
     try:
-        run_cmd("mkdir", "-p", root_nix)
-        run_cmd("mkdir", "-p", persist_nix)
-        run_cmd("mount", "--bind", root_nix, persist_nix)
-
         # Create persisted directories that impermanence expects at boot.
         for d in [
             "etc/nixos",
@@ -725,19 +739,32 @@ def run():
 
     rc, output = run_stream(*install_cmd)
 
-    # ------------------------------------------------------------------
-    # 8. Unmount the bind-mount before the Calamares umount module runs
-    # ------------------------------------------------------------------
-    try:
-        run_cmd("umount", persist_nix)
-        libcalamares.utils.debug("Unmounted bind: {}".format(persist_nix))
-    except RuntimeError as e:
-        libcalamares.utils.debug(
-            "Warning: could not unmount {}: {}".format(persist_nix, e)
-        )
-
     if rc != 0:
         return (_("nixos-install failed"), output)
+
+    # ------------------------------------------------------------------
+    # 8. Fix ownership of the persisted home directory
+    # ------------------------------------------------------------------
+    status = _("Fixing home directory permissions")
+    libcalamares.job.setprogress(0.90)
+
+    uid, gid = read_uid_gid(root, username)
+    if not uid or not gid:
+        return (
+            _("Installation error"),
+            _("Could not determine UID/GID for user '{}'.").format(username),
+        )
+
+    try:
+        run_cmd(
+            "chown",
+            "-R",
+            "{}:{}".format(uid, gid),
+            os.path.join(persist_root, "home", username),
+        )
+        run_cmd("chmod", "700", os.path.join(persist_root, "home", username))
+    except RuntimeError as e:
+        return (_("Failed to set home ownership"), str(e))
 
     # ------------------------------------------------------------------
     # 9. Copy the flake into /persist/etc/nixos so it survives reboots

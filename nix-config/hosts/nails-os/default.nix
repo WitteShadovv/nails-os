@@ -1,6 +1,6 @@
 { lib, ... }: {
   imports = [
-    ./hardware-configuration.nix
+    ../../hardware-configuration.nix
     # Written by the Calamares installer with the user-chosen hostname.
     # Guarded by pathExists so the flake evaluates cleanly before installation.
   ] ++ lib.optional (builtins.pathExists ./hostname.nix) ./hostname.nix
