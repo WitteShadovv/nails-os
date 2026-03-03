@@ -766,19 +766,10 @@ def run():
     except RuntimeError as e:
         return (_("Failed to set home ownership"), str(e))
 
-    # ------------------------------------------------------------------
-    # 9. Copy the flake into /persist/etc/nixos so it survives reboots
-    #    (impermanence.nix persists /etc/nixos from /persist/etc/nixos)
-    # ------------------------------------------------------------------
-    status = _("Persisting configuration")
-    libcalamares.job.setprogress(0.97)
-
-    persist_nixos = os.path.join(persist_root, "etc", "nixos")
-    try:
-        run_cmd("mkdir", "-p", persist_nixos)
-        run_cmd("cp", "-a", os.path.join(target_nixos, "."), persist_nixos)
-    except RuntimeError as e:
-        return (_("Failed to persist configuration"), str(e))
+    # Step 9 is no longer needed: target_nixos IS persist_root/etc/nixos
+    # (persist_root == root, and root is where nixos-install writes the flake).
+    # The config is already at the correct location on the ext4 — /persist/etc/nixos
+    # at runtime — so no copy is required.
 
     libcalamares.job.setprogress(1.0)
     return None
