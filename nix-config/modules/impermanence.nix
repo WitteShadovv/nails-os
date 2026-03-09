@@ -26,7 +26,6 @@ _: {
 
     files = [
       "/etc/machine-id" # Needed for various things like systemd logs
-      "/etc/adjtime" # Hardware clock offset
     ];
   };
 }

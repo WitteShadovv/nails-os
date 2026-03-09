@@ -33,6 +33,7 @@
 #   locationRegion   – timezone region               (set by locale module)
 #   locationZone     – timezone zone                 (set by locale module)
 
+import configparser
 import glob as _glob
 import gettext
 import json
@@ -652,6 +653,55 @@ def run():
             timezone, kb_layout, kb_variant
         )
     )
+
+    # ------------------------------------------------------------------
+    # 5c. Write network-mode.nix if user chose to disable Tor
+    #
+    # The tor-config QML view module persists the user's choice to an INI
+    # file via Qt.labs.settings (GlobalStorage.insert is not callable from
+    # QML).  We read that file here; if absent or unset, Tor stays enabled.
+    # ------------------------------------------------------------------
+    tor_enabled = True
+    tor_config_path = "/tmp/calamares-tor-config.ini"
+    try:
+        if os.path.exists(tor_config_path):
+            cp = configparser.ConfigParser()
+            cp.read(tor_config_path)
+            raw = cp.get("General", "torEnabled", fallback="true")
+            tor_enabled = raw.lower() not in ("false", "0", "no")
+    except Exception as ex:
+        libcalamares.utils.debug(
+            "Failed to read {}: {} — defaulting to Tor enabled".format(
+                tor_config_path, ex
+            )
+        )
+    libcalamares.utils.debug("torEnabled: {}".format(tor_enabled))
+
+    if not tor_enabled:
+        status = _("Configuring network mode (direct)")
+        libcalamares.job.setprogress(0.37)
+
+        network_mode_nix = (
+            "# Written by the Calamares installer — user chose direct networking.\n"
+            "{ lib, ... }:\n"
+            "{\n"
+            "  nailsOs.tor.enable = false;\n"
+            '  networking.nameservers = [ "9.9.9.9" "149.112.112.112" ];\n'
+            '  networking.networkmanager.dns = lib.mkForce "default";\n'
+            "}\n"
+        )
+
+        network_mode_dest = os.path.join(
+            target_nixos, "hosts", "nails-os", "network-mode.nix"
+        )
+        try:
+            write_file(network_mode_dest, network_mode_nix)
+        except RuntimeError as e:
+            return (_("Failed to write network mode configuration"), str(e))
+
+        libcalamares.utils.debug("Wrote network-mode.nix (Tor disabled)")
+    else:
+        libcalamares.utils.debug("Tor enabled (default) — no network-mode.nix written")
 
     # ------------------------------------------------------------------
     # 6. Prepare the /persist directory tree

@@ -85,18 +85,30 @@ let
     exec ${pkgs.util-linux}/bin/runuser -u clearnet -- ${pkgs.firefox}/bin/firefox "$@"
   '';
 in {
-  options.nailsOs.tor.useBridges = lib.mkOption {
-    type = lib.types.bool;
-    default = true;
-    description = ''
-      Use pluggable-transport bridges (obfs4 + Snowflake) for censorship
-      circumvention.  The default bridge set matches Tor Browser / Tails.
-      Set to false to connect directly to the Tor network, bypassing bridge
-      negotiation entirely.
-    '';
+  options.nailsOs.tor = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Enable transparent Tor routing for all network traffic.
+        When false, Tor is not started, nftables transparent proxy rules
+        are not installed, and the Unsafe Browser wrapper is omitted.
+      '';
+    };
+
+    useBridges = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Use pluggable-transport bridges (obfs4 + Snowflake) for censorship
+        circumvention.  The default bridge set matches Tor Browser / Tails.
+        Set to false to connect directly to the Tor network, bypassing bridge
+        negotiation entirely.
+      '';
+    };
   };
 
-  config = {
+  config = lib.mkIf config.nailsOs.tor.enable {
     services = {
       # NTP is needed so Tor doesn't reject the consensus due to clock skew.
       # Note: timesyncd (UDP 123) is blocked by the nftables filter until Tor

@@ -1,0 +1,4 @@
+---
+type:       "view"
+name:       "tor-config"
+interface:  "qml"

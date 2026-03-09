@@ -16,6 +16,10 @@ let
       mkdir -p $out/lib/calamares/modules/nails-os
       cp -r modules/nails-os/. $out/lib/calamares/modules/nails-os/
 
+      # QML view module: tor-config  →  $out/lib/calamares/modules/tor-config/
+      mkdir -p $out/lib/calamares/modules/tor-config
+      cp -r modules/tor-config/. $out/lib/calamares/modules/tor-config/
+
       # Branding  →  $out/share/calamares/branding/nails-os/
       mkdir -p $out/share/calamares/branding/nails-os
       cp -r branding/nails-os/. $out/share/calamares/branding/nails-os/
