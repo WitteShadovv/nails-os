@@ -1,4 +1,5 @@
 ---
-type:       "view"
-name:       "tor-config"
-interface:  "qml"
+type:       viewmodule
+interface:  python
+name:       tor-config
+script:     main.py

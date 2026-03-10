@@ -33,7 +33,6 @@
 #   locationRegion   – timezone region               (set by locale module)
 #   locationZone     – timezone zone                 (set by locale module)
 
-import configparser
 import glob as _glob
 import gettext
 import json
@@ -657,25 +656,18 @@ def run():
     # ------------------------------------------------------------------
     # 5c. Write network-mode.nix if user chose to disable Tor
     #
-    # The tor-config QML view module persists the user's choice to an INI
-    # file via Qt.labs.settings (GlobalStorage.insert is not callable from
-    # QML).  We read that file here; if absent or unset, Tor stays enabled.
+    # The packagechooser@torconfig view step stores the user's selection in
+    # GlobalStorage under key "packagechooser_torconfig".  Value is the
+    # item id: "tor" (default) or "direct".  If the key is absent we keep
+    # Tor enabled (safe default).
     # ------------------------------------------------------------------
     tor_enabled = True
-    tor_config_path = "/tmp/calamares-tor-config.ini"
-    try:
-        if os.path.exists(tor_config_path):
-            cp = configparser.ConfigParser()
-            cp.read(tor_config_path)
-            raw = cp.get("General", "torEnabled", fallback="true")
-            tor_enabled = raw.lower() not in ("false", "0", "no")
-    except Exception as ex:
-        libcalamares.utils.debug(
-            "Failed to read {}: {} — defaulting to Tor enabled".format(
-                tor_config_path, ex
-            )
-        )
-    libcalamares.utils.debug("torEnabled: {}".format(tor_enabled))
+    tor_choice = gs.value("packagechooser_torconfig")
+    if tor_choice is not None:
+        tor_enabled = tor_choice != "direct"
+    libcalamares.utils.debug(
+        "packagechooser_torconfig={!r}  torEnabled={}".format(tor_choice, tor_enabled)
+    )
 
     if not tor_enabled:
         status = _("Configuring network mode (direct)")
@@ -686,7 +678,7 @@ def run():
             "{ lib, ... }:\n"
             "{\n"
             "  nailsOs.tor.enable = false;\n"
-            '  networking.nameservers = [ "9.9.9.9" "149.112.112.112" ];\n'
+            '  networking.nameservers = lib.mkForce [ "9.9.9.9" "149.112.112.112" ];\n'
             '  networking.networkmanager.dns = lib.mkForce "default";\n'
             "}\n"
         )
