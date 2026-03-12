@@ -1,122 +1,254 @@
-# NAILS OS (TAILS-like NixOS)
+# NAILS OS
 
-NAILS OS is a TAILS-inspired NixOS configuration focused on privacy, anti-forensics, and strong defaults. It uses impermanence (tmpfs root + explicit persistence), Tor-by-default networking with transparent proxying, and a curated application set.
+**An amnesic, anti-forensic operating system. All traffic through Tor. Nothing survives reboot. Built declaratively on NixOS.**
 
-This repo contains:
-- A flake-based NixOS configuration under `nix-config/`
-- An installer ISO build target
-- A one-click installer that **wipes a disk**
+[![Build ISO](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml/badge.svg)](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![NixOS 25.11](https://img.shields.io/badge/NixOS-25.11-5277C3.svg?logo=nixos&logoColor=white)](https://nixos.org)
 
-## Quick start (build installer ISO)
+NAILS OS is a live Linux distribution designed for privacy, anonymity, and anti-forensic resistance. It routes all network traffic through Tor, runs entirely from RAM, and leaves no trace on the host machine after shutdown. The desktop environment is **GNOME**. Built declaratively on NixOS for reproducibility and auditability.
 
-Requirements: Nix with flakes enabled.
+Designed for journalists, activists, researchers, and anyone who needs to leave no trace on shared or borrowed hardware.
 
-```
+## Table of Contents
+
+- [Key Features](#key-features)
+- [Threat Model](#threat-model)
+- [System Requirements](#system-requirements)
+- [Quick Start](#quick-start)
+- [ISO Verification](#iso-verification)
+- [Installation](#installation)
+- [Network Modes](#network-modes)
+- [Persistence Model](#persistence-model)
+- [CI/CD Pipeline](#cicd-pipeline)
+- [Repository Setup for CI/CD](#repository-setup-for-cicd)
+- [Repository Structure](#repository-structure)
+- [Contributing](#contributing)
+- [Acknowledgments](#acknowledgments)
+- [License](#license)
+
+## Key Features
+
+- **Amnesic by default** — root filesystem is wiped on every reboot. Nothing persists unless explicitly declared on an encrypted volume.
+- **Tor by default** — all network traffic is transparently routed through Tor, including DNS. No traffic leaks.
+- **Pluggable transports** — obfs4 and Snowflake bridges are preconfigured for censorship circumvention.
+- **Full-disk encryption** — the installer enforces LUKS2 encryption. It will refuse to proceed without it.
+- **Kernel hardening** — memory zeroing on alloc/free, AppArmor, DMA attack surface removed (FireWire/Thunderbolt/USB4 blacklisted), SMT disabled, Spectre and MDS mitigations enabled.
+- **MAC address randomization** — WiFi and Ethernet MAC addresses are randomized on every connection. DHCP hostname sending is disabled.
+- **Curated privacy toolkit** — Tor Browser, OnionShare, Electrum, Thunderbird, Pidgin with OTR, KeePassXC, VeraCrypt, MAT2 (metadata removal), GnuPG, and more.
+- **Unsafe Browser** — a sandboxed browser (separate system user, dedicated firewall rules) that bypasses Tor, strictly for captive portal login.
+- **Reproducible builds** — CI performs two levels of reproducibility verification: L1 same-store check and L2 full rebuild comparison.
+- **IPv6 disabled** — prevents IPv6 address leaks that could bypass Tor anonymity.
+
+## Threat Model
+
+NAILS OS is designed to protect against:
+
+- **Forensic analysis of the device** — tmpfs root means no trace after shutdown, unless the attacker has access to the encrypted persistent volume.
+- **Network surveillance** — all traffic goes through Tor; MAC addresses are randomized; DHCP does not leak the hostname.
+- **Data persistence on shared or borrowed hardware** — boot from USB, leave no trace.
+- **Censorship** — pluggable transports help circumvent Tor blocking in restrictive networks.
+
+NAILS OS does **not** protect against:
+
+- **Targeted attacks by well-resourced adversaries with physical access** to the running machine (cold boot attacks, hardware implants).
+- **Compromised firmware or BIOS** — NAILS OS runs on commodity hardware and trusts the firmware layer.
+- **User error** — if you log into personal accounts over Tor, you deanonymize yourself.
+- **Correlation attacks** — a global passive adversary can correlate Tor entry and exit traffic.
+- **Exit node eavesdropping** — unencrypted traffic leaving the Tor network is visible to the exit relay. Always use HTTPS or end-to-end encryption for sensitive communications.
+
+> The network protections listed above apply only in Tor mode. If you choose Direct mode during installation, your IP address and network traffic are fully visible.
+
+No software can substitute for sound operational security practices.
+
+## System Requirements
+
+| Requirement | Details |
+|---|---|
+| Architecture | x86_64 only |
+| Boot | UEFI required (systemd-boot, not GRUB) |
+| RAM | 4 GB minimum (root filesystem runs entirely from RAM) |
+| USB | 4 GB minimum for the installer ISO |
+| Disk | Any size; fully encrypted (EFI partition + LUKS2 root) |
+
+## Quick Start
+
+Requires [Nix with flakes enabled](https://nixos.org/download) (enable flakes in `~/.config/nix/nix.conf`).
+
+```bash
 nix build ./nix-config#nails-os-iso
+
+# Find the built ISO
+ls result/iso/
+
+# Write to USB (replace /dev/sdX — double-check the target device!)
+sudo dd if=result/iso/<filename>.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
 
-The ISO will be in:
+## ISO Verification
+
+If you downloaded a release ISO, verify its integrity before writing to USB:
+
+```bash
+# Verify checksum
+sha256sum -c SHA256SUMS
+
+# Verify build provenance (requires gh CLI)
+gh attestation verify <iso-file> --repo WitteShadovv/nails-os
 ```
-result/iso/*.iso
-```
 
-## Installer ISO options
+## Installation
 
-### 1) One-click install (DANGER: ERASES DISK)
-The installer ISO includes a GUI-driven one-click installer:
-- Launches from the desktop as **"NAILS OS One-Click Install (ERASES DISK)"**
-- Prompts for target disk, confirmations, LUKS passphrase, and user password
-- Prompts for a network mode during installation:
-  - **Tor (recommended):** transparent Tor routing with Tor DNS
-  - **Direct / non-Tor:** normal clearnet routing with Quad9 DNS (`9.9.9.9`, `149.112.112.112`)
-- Creates a GPT disk layout with:
-  - EFI system partition
-  - A single encrypted `/persist` partition
-- Installs NAILS OS using the embedded flake
+### GUI Installer
 
-**This process permanently deletes all data on the selected disk.**
+> :warning: **WARNING:** The installer erases the entire target disk. All existing data will be permanently destroyed.
 
-### 2) Manual install
-You can also install manually using the config embedded on the ISO:
+1. Boot the ISO from USB.
+2. The Calamares installer launches from the desktop.
+3. Select locale, keyboard, and target disk.
+4. Set a password for the `amnesia` user account.
+5. Choose network routing: Tor (recommended) or Direct.
+6. Review and install.
+7. Reboot into NAILS OS. The system boots into a GNOME desktop.
 
-```
-# Partition/mount target to /mnt, then:
+The installer creates a 1 GiB EFI system partition and a LUKS2-encrypted root partition. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
+
+**Default user:** `amnesia` (UID 1000, member of wheel, networkmanager, video, audio).
+
+### Manual Installation
+
+```bash
+# Partition and mount your target to /mnt, then:
 nixos-generate-config --root /mnt
 cp /mnt/etc/nixos/hardware-configuration.nix /etc/nixos/hardware-configuration.nix
 nixos-install --flake /etc/nixos#nails-os
 ```
 
-## Persistence model
+## Network Modes
 
-- Root is a tmpfs.
-- `/persist` is an encrypted ext4 volume.
-- `/nix` is a bind-mount inside `/persist`.
-- Persistence is explicit and minimal by default.
+- **Tor (default):** All TCP transparently proxied through Tor. DNS resolved through Tor. Unsafe Browser available for captive portals. obfs4 and Snowflake bridges active.
+- **Direct:** Normal clearnet routing with Quad9 DNS (9.9.9.9, 149.112.112.112). No Tor. Your IP address is visible to the network.
 
-See `nix-config/modules/impermanence.nix` for the persisted paths.
+The network mode is chosen during installation. It can be changed post-install by editing `nix-config/hosts/nails-os/network-mode.nix`.
 
-## Tor and pluggable transports
+## Persistence Model
 
-- Transparent proxying redirects TCP through Tor by default.
-- Snowflake transport is enabled by default (bridges are used automatically).
-- obfs4 is included so you can add obfs4 bridge lines if needed.
-- The installer can also generate a direct / non-Tor host override by writing `nix-config/hosts/nails-os/network-mode.nix` on the installed system.
+Root is tmpfs — wiped every reboot. Only these paths survive on the encrypted `/persist` volume:
 
-### Network modes
+- `/etc/nixos` — system configuration
+- `/home/amnesia` — user home directory
+- `/var/lib/nixos` — UID/GID state
+- `/etc/machine-id` — systemd identity
+- A small set of hardware state (Bluetooth pairings, backlight, rfkill)
 
-- **Tor mode (default):**
-  - `nailsOs.tor.enable = true`
-  - `networking.nameservers = [ "127.0.0.1" ]`
-  - `networking.networkmanager.dns = "none"`
-  - Enables Tor service, transparent proxying, and nftables redirect rules
-- **Direct / non-Tor mode:**
-  - `nailsOs.tor.enable = false`
-  - `networking.nameservers = [ "9.9.9.9" "149.112.112.112" ]`
-  - `networking.networkmanager.dns = "default"`
-  - Disables Tor service and Tor-specific transparent proxying
+Everything else — logs, temp files, browser state, application data outside home — is gone after power-off. Full list: [`nix-config/modules/impermanence.nix`](nix-config/modules/impermanence.nix).
 
-Tor config: `nix-config/modules/tor.nix`
-Network defaults: `nix-config/modules/network.nix`
+## CI/CD Pipeline
 
-## User account
+The project uses an automated CI/CD pipeline with ephemeral Hetzner Cloud servers as GitHub Actions runners.
 
-- Default user: `amnesia`
-- The one-click installer prompts for the `amnesia` password and persists it.
-- Password hash is stored under `/etc/nixos/modules/secrets` on the installed system.
+**Build pipeline** (`build-iso.yml`): Triggered on pushes to `main`, pull requests, manual dispatch, or as a reusable workflow. Provisions an ephemeral build server on Hetzner Cloud, builds the ISO, runs L1 and L2 reproducibility checks, then unconditionally destroys the server.
 
-User config: `nix-config/modules/users.nix`
+**Release pipeline** (`release.yml`): Triggered on `v*` tag pushes or manual dispatch. Calls the build pipeline, then creates a GitHub Release with the ISO, SHA256SUMS, and build metadata as release assets. Generates Sigstore build provenance attestation (verifiable with `gh attestation verify`).
 
-## Unfree software
+**Failsafe cleanup** (`hetzner-cleanup.yml`): Runs daily at 00:01 UTC. Destroys any servers remaining in the Hetzner project to prevent orphaned servers from accruing charges. Creates a GitHub Issue notification if any servers were cleaned up.
 
-VeraCrypt is included and requires unfree allowance. This is handled in:
-`nix-config/modules/base.nix` via `allowUnfreePredicate`.
+## Repository Setup for CI/CD
 
-## Repo layout
+### Required Secrets
 
-- `nix-config/flake.nix` - flake entry
-- `nix-config/hardware-configuration.nix` - hardware config (canonical path)
-- `nix-config/configuration.nix` - compatibility entry point
-- `nix-config/hosts/nails-os/` - installed system host config
-- `nix-config/hosts/nails-os-iso/` - installer ISO host config
-- `nix-config/modules/` - reusable modules
-- `nix-config/home/` - Home Manager config
-- `.github/workflows/build-iso.yml` - manual ISO build + release upload
+Configure under Settings > Secrets and variables > Actions > Secrets:
 
-## CI/CD (manual)
+| Secret | Description |
+|---|---|
+| `PERSONAL_ACCESS_TOKEN` | GitHub fine-grained PAT with Administration read/write scope on this repository. Used for self-hosted runner registration. |
+| `HCLOUD_TOKEN` | Hetzner Cloud API token with Read & Write permissions. Used to provision and destroy build servers. |
 
-A GitHub Actions workflow builds the ISO on demand and uploads the ISO and SHA256:
-- Trigger: Actions → Build NAILS OS ISO → Run workflow
-- Inputs: release tag (e.g. `v0.1.0`)
+### Required Variables
 
-Workflow: `.github/workflows/build-iso.yml`
+Configure under Settings > Secrets and variables > Actions > Variables:
 
-## Security notes
+| Variable | Description |
+|---|---|
+| `HCLOUD_SSH_KEY_ID` | **Name** of an SSH key uploaded to your Hetzner Cloud project. When set, the build server is provisioned with this key and Hetzner will not email a root password. If omitted, the pipeline still works but Hetzner sends a root password email for every build. |
 
-- This system is designed to minimize data persistence and enforce Tor-by-default routing.
-- Tor remains the recommended mode for privacy. Direct / non-Tor mode is available for cases where Tor connectivity is undesirable or unavailable, but it exposes your IP address and disables Tor-based anonymity protections.
-- The one-click installer is intentionally destructive. Use it only on a dedicated disk.
-- Review and adjust persisted paths to fit your threat model.
+**Important:** Despite its name, `HCLOUD_SSH_KEY_ID` expects the SSH key **name** as it appears in the Hetzner Cloud console — not a numeric ID or fingerprint. To find it: [Hetzner Cloud Console](https://console.hetzner.cloud) > your project > Security > SSH Keys. Use the name shown there.
+
+## Repository Structure
+
+```
+nails-os/
+  .github/workflows/
+    build-iso.yml              # ISO build + reproducibility CI
+    release.yml                # GitHub Release publishing
+    hetzner-cleanup.yml        # Daily failsafe server cleanup
+  nix-config/
+    flake.nix                  # Flake entry point
+    flake.lock                 # Pinned dependencies
+    configuration.nix          # Compatibility shim
+    hardware-configuration.nix # Generated hardware config
+    hosts/
+      nails-os/                # Installed system configuration
+      nails-os-iso/            # Installer ISO configuration + Calamares
+    modules/                   # Reusable NixOS modules
+      base.nix                 # Base system settings
+      boot.nix                 # systemd-boot, initrd, kernel
+      home.nix                 # Home Manager integration
+      storage.nix              # Disk layout, LUKS, mount points
+      tor.nix                  # Tor transparent proxy + bridges + nftables
+      security.nix             # Kernel hardening, AppArmor
+      impermanence.nix         # tmpfs root + persistence declarations
+      network.nix              # MAC randomization, DNS, IPv6 disable
+      packages.nix             # Application manifest
+      users.nix                # User accounts
+      ...
+    home/                      # Home Manager configuration
+    overlays/                  # Package overlays
+  LICENSE
+```
+
+## Contributing
+
+The project uses pre-commit hooks for code quality:
+
+```bash
+pre-commit install
+```
+
+Hooks include: `nixfmt` (formatting), `deadnix` (dead code), `statix` (linting), `nix-instantiate --parse` (syntax), `nix-flake-update` (automatically updates `flake.lock` on every commit), `detect-secrets`, standard checks (trailing whitespace, YAML/JSON validation, merge conflict detection), and a full NixOS configuration evaluation.
+
+To test changes locally:
+
+```bash
+# Validate the configuration evaluates successfully
+nix eval ./nix-config#nixosConfigurations.nails-os.config.system.build.toplevel.drvPath
+
+# Build the ISO
+nix build ./nix-config#nails-os-iso
+
+# Test in QEMU (no USB needed)
+qemu-system-x86_64 -enable-kvm -m 4096 -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom result/iso/*.iso
+```
+
+## Acknowledgments
+
+- [Tails](https://tails.net) — the original amnesic privacy OS, and the inspiration for this project
+- [NixOS](https://nixos.org) — the declarative, reproducible Linux distribution that makes this possible
+- [Tor Project](https://www.torproject.org) — for the anonymity network and pluggable transports
+- [nix-community/impermanence](https://github.com/nix-community/impermanence) — tmpfs root and declarative persistence
+- [Cyclenerd/hcloud-github-runner](https://github.com/Cyclenerd/hcloud-github-runner) — ephemeral Hetzner Cloud runners for GitHub Actions
+
+Development of NAILS was assisted by Claude (Anthropic) — Sonnet and Opus models were used for code generation, testing, and documentation throughout the project.
+All code has been reviewed, tested, and validated by the author.
 
 ## License
 
-See `LICENSE`.
+This project is licensed under the **GNU General Public License v3.0**.
+See [LICENSE](LICENSE) for the full text.
+
+> **Disclaimer:** This software is for educational and security research purposes.
+> Users are solely responsible for compliance with applicable laws and regulations.
+> The authors make no warranties — express or implied — about the security properties
+> of this software in any specific threat environment.
+>
+> **Use at your own risk. Test thoroughly before relying on it.**

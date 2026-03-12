@@ -80,7 +80,7 @@ jobs:
       # 1. Checkout — required for `gh` CLI repository context
       # -----------------------------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -88,7 +88,7 @@ jobs:
       # 2. Download build artifacts produced by the build job
       # -----------------------------------------------------------------------
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nails-os-iso-${{ github.sha }}
           path: dist/
@@ -226,7 +226,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Create artifact attestation
         if: steps.repo.outputs.is_public == 'true'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.iso
 

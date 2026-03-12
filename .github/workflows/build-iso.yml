@@ -99,7 +99,7 @@ jobs:
         with:
           mode: create
           server_type: ccx33
-          server_location: nbg1
+          location: nbg1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -134,7 +134,7 @@ jobs:
         with:
           mode: create
           server_type: ccx33
-          server_location: hel1
+          location: hel1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -169,7 +169,7 @@ jobs:
         with:
           mode: create
           server_type: ccx33
-          server_location: fsn1
+          location: fsn1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -207,7 +207,7 @@ jobs:
         with:
           mode: create
           server_type: ccx23
-          server_location: nbg1
+          location: nbg1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -246,7 +246,7 @@ jobs:
         with:
           mode: create
           server_type: ccx23
-          server_location: hel1
+          location: hel1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -286,7 +286,7 @@ jobs:
         with:
           mode: create
           server_type: ccx23
-          server_location: fsn1
+          location: fsn1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -327,7 +327,7 @@ jobs:
         with:
           mode: create
           server_type: cpx41
-          server_location: nbg1
+          location: nbg1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -369,7 +369,7 @@ jobs:
         with:
           mode: create
           server_type: cpx41
-          server_location: hel1
+          location: hel1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -412,7 +412,7 @@ jobs:
         with:
           mode: create
           server_type: cpx41
-          server_location: fsn1
+          location: fsn1
           image: ubuntu-24.04
           create_wait: '60'
           server_wait: '30'
@@ -587,7 +587,7 @@ jobs:
       # Checkout
       # -----------------------------------------------------------------------
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -869,7 +869,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Upload diffoscope report
         if: steps.l2-check.outputs.reproducible == 'false' && steps.l2-check.outputs.diffoscope_report != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: diffoscope-report-${{ github.sha }}
           path: /tmp/diffoscope-report.html
@@ -884,7 +884,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Upload ISO artifacts
         if: github.event_name == 'workflow_call'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nails-os-iso-${{ github.sha }}
           path: dist/*
@@ -922,13 +922,93 @@ jobs:
           printf '| **Ref** | `%s` |\n' "${{ github.ref_name }}" >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
+  # Job 2b: Publish rolling "latest" release (push to main only)
+  # ===========================================================================
+  # On every successful push-to-main build, update the "latest" pre-release
+  # with the freshly built ISO. This ensures every build is usable — the ISO
+  # never goes to waste. Release assets on public repos are free and unmetered.
+  #
+  # This does NOT run on:
+  #   - Pull requests (no release for untested code)
+  #   - workflow_call (release.yml handles its own release creation)
+  #   - workflow_dispatch (manual builds are for testing, not releasing)
+  # ===========================================================================
+  publish-latest:
+    needs: [create-runner, build-and-verify]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ needs.create-runner.outputs.label }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Publish to latest release
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="latest"
+          TITLE="NAILS OS (latest build)"
+
+          echo "::group::Preparing release assets"
+          # Verify dist/ exists from build-and-verify job
+          if [ ! -d dist ] || ! find dist -name '*.iso' -type f | grep -q .; then
+            echo "::error::No ISO found in dist/ — build-and-verify may have failed"
+            exit 1
+          fi
+
+          ISO_FILE=$(find dist -name '*.iso' -type f | head -1)
+          ISO_NAME=$(basename "$ISO_FILE")
+          echo "ISO: $ISO_NAME"
+          ls -lh dist/
+          echo "::endgroup::"
+
+          echo "::group::Managing latest release"
+          # Delete existing latest release if it exists (idempotent)
+          if gh release view "$TAG" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "Deleting existing '$TAG' release..."
+            gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          fi
+
+          # Create the release
+          # --target ensures the release points to the actual commit that was built
+          NOTES="Rolling build from \`main\` branch.
+
+          **Commit:** \`${{ github.sha }}\`
+          **Built:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          > This is an automated pre-release updated on every push to \`main\`.
+          > For stable releases, see the versioned tags (\`v*\`).
+
+          \`\`\`
+          $(cat dist/SHA256SUMS)
+          \`\`\`"
+
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --notes "$NOTES" \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            dist/*.iso dist/SHA256SUMS dist/build-metadata.json
+
+          RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url')
+          echo "::notice::Published latest release: $RELEASE_URL"
+          echo "::endgroup::"
+
+  # ===========================================================================
   # Job 3: Destroy the Hetzner Cloud server
   # ===========================================================================
   # MUST run unconditionally (if: always()) to prevent orphaned servers that
   # would continue to accrue charges. This is the billing safety net.
   # ===========================================================================
   delete-runner:
-    needs: [create-runner, build-and-verify]
+    needs: [create-runner, build-and-verify, publish-latest]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: always()
