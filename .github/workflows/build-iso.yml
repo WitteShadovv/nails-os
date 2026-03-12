@@ -101,7 +101,7 @@ jobs:
           server_type: ccx33
           server_location: nbg1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -132,7 +132,7 @@ jobs:
           server_type: ccx33
           server_location: hel1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -163,7 +163,7 @@ jobs:
           server_type: ccx33
           server_location: fsn1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -197,7 +197,7 @@ jobs:
           server_type: ccx23
           server_location: nbg1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -232,7 +232,7 @@ jobs:
           server_type: ccx23
           server_location: hel1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -268,7 +268,7 @@ jobs:
           server_type: ccx23
           server_location: fsn1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -305,7 +305,7 @@ jobs:
           server_type: cpx41
           server_location: nbg1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -343,7 +343,7 @@ jobs:
           server_type: cpx41
           server_location: hel1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -382,7 +382,7 @@ jobs:
           server_type: cpx41
           server_location: fsn1
           image: ubuntu-24.04
-          create_wait: '12'
+          create_wait: '60'
           server_wait: '30'
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -410,15 +410,15 @@ jobs:
 
           # Array of combo metadata: step_id|server_type|location
           combos=(
-            "combo-1|ccx33|fsn1"
-            "combo-2|ccx33|nbg1"
-            "combo-3|ccx33|hel1"
-            "combo-4|ccx23|fsn1"
-            "combo-5|ccx23|nbg1"
-            "combo-6|ccx23|hel1"
-            "combo-7|cpx41|fsn1"
-            "combo-8|cpx41|nbg1"
-            "combo-9|cpx41|hel1"
+            "combo-1|ccx33|nbg1"
+            "combo-2|ccx33|hel1"
+            "combo-3|ccx33|fsn1"
+            "combo-4|ccx23|nbg1"
+            "combo-5|ccx23|hel1"
+            "combo-6|ccx23|fsn1"
+            "combo-7|cpx41|nbg1"
+            "combo-8|cpx41|hel1"
+            "combo-9|cpx41|fsn1"
           )
 
           # Step outcomes from GitHub context
@@ -666,8 +666,8 @@ jobs:
         continue-on-error: true
         if: >-
           (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          (github.event_name == 'workflow_dispatch' && inputs.verify_reproducibility != false) ||
-          (github.event_name == 'workflow_call' && inputs.verify_reproducibility != false)
+          (github.event_name == 'workflow_dispatch' && inputs.verify_reproducibility == true) ||
+          (github.event_name == 'workflow_call' && inputs.verify_reproducibility == true)
         run: |
           echo "::group::L2 full rebuild reproducibility verification"
           CANONICAL_HASH="${{ steps.build-iso.outputs.iso_sha256 }}"
@@ -741,7 +741,11 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          cp result/iso/*.iso dist/
+          ISO_PATH="${{ steps.build-iso.outputs.iso_path }}"
+          if [[ -z "$ISO_PATH" || ! -f "$ISO_PATH" ]]; then
+            ISO_PATH="$(find result/iso -name '*.iso' -type f | head -1)"
+          fi
+          cp "$ISO_PATH" dist/
           (cd dist && sha256sum *.iso > SHA256SUMS)
           echo "Contents of dist/:"
           ls -lh dist/
@@ -863,21 +867,18 @@ jobs:
           [[ "$L2_RESULT" == "false" ]] && L2_ICON="❌"
           [[ -z "$L2_RESULT" || "$L2_RESULT" == "skipped" ]] && L2_ICON="⏭️"
 
-          cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          ## NAILS OS Build Summary
-
-          | Property | Value |
-          |----------|-------|
-          | **ISO filename** | \`${{ steps.build-iso.outputs.iso_filename }}\` |
-          | **ISO SHA256** | \`${{ steps.build-iso.outputs.iso_sha256 }}\` |
-          | **ISO size** | $(( ${{ steps.build-iso.outputs.iso_size || 0 }} / 1048576 )) MB |
-          | **Build duration** | ${{ steps.build-iso.outputs.build_duration }}s |
-          | **Server** | ${{ needs.create-runner.outputs.server_type }} @ ${{ needs.create-runner.outputs.location }} |
-          | **L1 (same-store)** | ${L1_ICON} ${L1_RESULT:-not run} |
-          | **L2 (full rebuild)** | ${L2_ICON} ${L2_RESULT:-not run} |
-          | **Commit** | \`${{ github.sha }}\` |
-          | **Ref** | \`${{ github.ref_name }}\` |
-          EOF
+          printf '## NAILS OS Build Summary\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Property | Value |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|----------|-------|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| **ISO filename** | `%s` |\n' "${{ steps.build-iso.outputs.iso_filename }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **ISO SHA256** | `%s` |\n' "${{ steps.build-iso.outputs.iso_sha256 }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **ISO size** | %s MB |\n' "$(( ${{ steps.build-iso.outputs.iso_size || 0 }} / 1048576 ))" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Build duration** | %ss |\n' "${{ steps.build-iso.outputs.build_duration }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Server** | %s @ %s |\n' "${{ needs.create-runner.outputs.server_type }}" "${{ needs.create-runner.outputs.location }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **L1 (same-store)** | %s %s |\n' "${L1_ICON}" "${L1_RESULT:-not run}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **L2 (full rebuild)** | %s %s |\n' "${L2_ICON}" "${L2_RESULT:-not run}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Commit** | `%s` |\n' "${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Ref** | `%s` |\n' "${{ github.ref_name }}" >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
   # Job 3: Destroy the Hetzner Cloud server
