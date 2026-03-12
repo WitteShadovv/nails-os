@@ -78,7 +78,7 @@ jobs:
   #
   # Fallback order (most powerful → most available):
   #   ccx33 (8 dedicated vCPU, 32GB) → ccx23 (4 dedicated, 16GB) → cpx41 (8 shared, 16GB)
-  #   Locations: fsn1 (Falkenstein) → nbg1 (Nuremberg) → hel1 (Helsinki)
+  #   Locations: nbg1 (Nuremberg) → hel1 (Helsinki) → fsn1 (Falkenstein)
   # ===========================================================================
   create-runner:
     runs-on: ubuntu-latest
@@ -90,41 +90,10 @@ jobs:
       location: ${{ steps.determine-combo.outputs.location }}
     steps:
       # -----------------------------------------------------------------------
-      # Combo 1: ccx33 @ fsn1 (8 dedicated vCPU, 32GB RAM, 240GB SSD)
+      # Combo 1: ccx33 @ nbg1 (8 dedicated vCPU, 32GB RAM, 240GB SSD)
       # -----------------------------------------------------------------------
-      - name: "Try combo 1: ccx33 @ fsn1"
+      - name: "Try combo 1: ccx33 @ nbg1"
         id: combo-1
-        continue-on-error: true
-        uses: Cyclenerd/hcloud-github-runner@v1
-        with:
-          mode: create
-          server_type: ccx33
-          server_location: fsn1
-          image: ubuntu-24.04
-          create_wait: '12'
-          server_wait: '30'
-          runner_wait: '120'
-          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-
-      # -----------------------------------------------------------------------
-      # Combo 2: ccx33 @ nbg1 (Nuremberg, DE)
-      # -----------------------------------------------------------------------
-      - name: "Try combo 2: ccx33 @ nbg1"
-        id: combo-2
-        if: steps.combo-1.outcome == 'failure'
         continue-on-error: true
         uses: Cyclenerd/hcloud-github-runner@v1
         with:
@@ -151,11 +120,11 @@ jobs:
             systemctl restart nix-daemon
 
       # -----------------------------------------------------------------------
-      # Combo 3: ccx33 @ hel1 (Helsinki, FI)
+      # Combo 2: ccx33 @ hel1 (Helsinki, FI)
       # -----------------------------------------------------------------------
-      - name: "Try combo 3: ccx33 @ hel1"
-        id: combo-3
-        if: steps.combo-1.outcome == 'failure' && steps.combo-2.outcome == 'failure'
+      - name: "Try combo 2: ccx33 @ hel1"
+        id: combo-2
+        if: steps.combo-1.outcome == 'failure'
         continue-on-error: true
         uses: Cyclenerd/hcloud-github-runner@v1
         with:
@@ -182,19 +151,16 @@ jobs:
             systemctl restart nix-daemon
 
       # -----------------------------------------------------------------------
-      # Combo 4: ccx23 @ fsn1 (4 dedicated vCPU, 16GB RAM, 160GB SSD)
+      # Combo 3: ccx33 @ fsn1 (Falkenstein, DE)
       # -----------------------------------------------------------------------
-      - name: "Try combo 4: ccx23 @ fsn1"
-        id: combo-4
-        if: >-
-          steps.combo-1.outcome == 'failure' &&
-          steps.combo-2.outcome == 'failure' &&
-          steps.combo-3.outcome == 'failure'
+      - name: "Try combo 3: ccx33 @ fsn1"
+        id: combo-3
+        if: steps.combo-1.outcome == 'failure' && steps.combo-2.outcome == 'failure'
         continue-on-error: true
         uses: Cyclenerd/hcloud-github-runner@v1
         with:
           mode: create
-          server_type: ccx23
+          server_type: ccx33
           server_location: fsn1
           image: ubuntu-24.04
           create_wait: '12'
@@ -216,15 +182,14 @@ jobs:
             systemctl restart nix-daemon
 
       # -----------------------------------------------------------------------
-      # Combo 5: ccx23 @ nbg1
+      # Combo 4: ccx23 @ nbg1 (4 dedicated vCPU, 16GB RAM, 160GB SSD)
       # -----------------------------------------------------------------------
-      - name: "Try combo 5: ccx23 @ nbg1"
-        id: combo-5
+      - name: "Try combo 4: ccx23 @ nbg1"
+        id: combo-4
         if: >-
           steps.combo-1.outcome == 'failure' &&
           steps.combo-2.outcome == 'failure' &&
-          steps.combo-3.outcome == 'failure' &&
-          steps.combo-4.outcome == 'failure'
+          steps.combo-3.outcome == 'failure'
         continue-on-error: true
         uses: Cyclenerd/hcloud-github-runner@v1
         with:
@@ -251,9 +216,44 @@ jobs:
             systemctl restart nix-daemon
 
       # -----------------------------------------------------------------------
-      # Combo 6: ccx23 @ hel1
+      # Combo 5: ccx23 @ hel1
       # -----------------------------------------------------------------------
-      - name: "Try combo 6: ccx23 @ hel1"
+      - name: "Try combo 5: ccx23 @ hel1"
+        id: combo-5
+        if: >-
+          steps.combo-1.outcome == 'failure' &&
+          steps.combo-2.outcome == 'failure' &&
+          steps.combo-3.outcome == 'failure' &&
+          steps.combo-4.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: ccx23
+          server_location: hel1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Combo 6: ccx23 @ fsn1
+      # -----------------------------------------------------------------------
+      - name: "Try combo 6: ccx23 @ fsn1"
         id: combo-6
         if: >-
           steps.combo-1.outcome == 'failure' &&
@@ -266,7 +266,7 @@ jobs:
         with:
           mode: create
           server_type: ccx23
-          server_location: hel1
+          server_location: fsn1
           image: ubuntu-24.04
           create_wait: '12'
           server_wait: '30'
@@ -287,9 +287,9 @@ jobs:
             systemctl restart nix-daemon
 
       # -----------------------------------------------------------------------
-      # Combo 7: cpx41 @ fsn1 (8 shared vCPU, 16GB RAM, 240GB SSD)
+      # Combo 7: cpx41 @ nbg1 (8 shared vCPU, 16GB RAM, 240GB SSD)
       # -----------------------------------------------------------------------
-      - name: "Try combo 7: cpx41 @ fsn1"
+      - name: "Try combo 7: cpx41 @ nbg1"
         id: combo-7
         if: >-
           steps.combo-1.outcome == 'failure' &&
@@ -303,7 +303,7 @@ jobs:
         with:
           mode: create
           server_type: cpx41
-          server_location: fsn1
+          server_location: nbg1
           image: ubuntu-24.04
           create_wait: '12'
           server_wait: '30'
@@ -324,9 +324,9 @@ jobs:
             systemctl restart nix-daemon
 
       # -----------------------------------------------------------------------
-      # Combo 8: cpx41 @ nbg1
+      # Combo 8: cpx41 @ hel1
       # -----------------------------------------------------------------------
-      - name: "Try combo 8: cpx41 @ nbg1"
+      - name: "Try combo 8: cpx41 @ hel1"
         id: combo-8
         if: >-
           steps.combo-1.outcome == 'failure' &&
@@ -341,7 +341,7 @@ jobs:
         with:
           mode: create
           server_type: cpx41
-          server_location: nbg1
+          server_location: hel1
           image: ubuntu-24.04
           create_wait: '12'
           server_wait: '30'
@@ -362,9 +362,9 @@ jobs:
             systemctl restart nix-daemon
 
       # -----------------------------------------------------------------------
-      # Combo 9: cpx41 @ hel1 (last resort)
+      # Combo 9: cpx41 @ fsn1 (last resort)
       # -----------------------------------------------------------------------
-      - name: "Try combo 9: cpx41 @ hel1"
+      - name: "Try combo 9: cpx41 @ fsn1"
         id: combo-9
         if: >-
           steps.combo-1.outcome == 'failure' &&
@@ -380,7 +380,7 @@ jobs:
         with:
           mode: create
           server_type: cpx41
-          server_location: hel1
+          server_location: fsn1
           image: ubuntu-24.04
           create_wait: '12'
           server_wait: '30'
