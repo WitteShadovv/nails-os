@@ -106,7 +106,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -141,7 +141,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -176,7 +176,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -214,7 +214,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -253,7 +253,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -293,7 +293,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -334,7 +334,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -376,7 +376,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -419,7 +419,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
