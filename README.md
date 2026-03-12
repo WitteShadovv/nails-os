@@ -170,9 +170,9 @@ Configure under Settings > Secrets and variables > Actions > Variables:
 
 | Variable | Description |
 |---|---|
-| `HCLOUD_SSH_KEY_ID` | **Name** of an SSH key uploaded to your Hetzner Cloud project. When set, the build server is provisioned with this key and Hetzner will not email a root password. If omitted, the pipeline still works but Hetzner sends a root password email for every build. |
+| `HCLOUD_SSH_KEY_ID` | **Numeric ID** of an SSH key uploaded to your Hetzner Cloud project. When set, the build server is provisioned with this key and Hetzner will not email a root password. If omitted, the pipeline still works but Hetzner sends a root password email for every build. |
 
-**Important:** Despite its name, `HCLOUD_SSH_KEY_ID` expects the SSH key **name** as it appears in the Hetzner Cloud console — not a numeric ID or fingerprint. To find it: [Hetzner Cloud Console](https://console.hetzner.cloud) > your project > Security > SSH Keys. Use the name shown there.
+**Important:** `HCLOUD_SSH_KEY_ID` requires the **numeric ID** of the SSH key — not its name or fingerprint. To find it: go to [Hetzner Cloud Console](https://console.hetzner.cloud) > your project > Security > SSH Keys, click the key, and copy the ID shown in the URL or key details (a number like `12345678`).
 
 ## Repository Structure
 
