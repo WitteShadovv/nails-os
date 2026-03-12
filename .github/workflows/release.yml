@@ -1,0 +1,421 @@
+# =============================================================================
+# NAILS OS Release Workflow
+# =============================================================================
+#
+# Creates a GitHub Release for NAILS OS with ISO artifacts, checksums,
+# build provenance attestation, and reproducibility verification results.
+#
+# Triggers:
+#   - Manual dispatch with tag/release name inputs
+#   - Automatic on version tag push (v*)
+#
+# This workflow calls build-iso.yml as a reusable workflow, then packages
+# the resulting artifacts into a signed GitHub Release.
+# =============================================================================
+
+name: Release NAILS OS
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g., v0.1.0)"
+        required: true
+        type: string
+      release_name:
+        description: "Release name (e.g., NAILS OS v0.1.0)"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+# ---------------------------------------------------------------------------
+# Top-level permissions are intentionally empty (least privilege).
+# Each job declares only the permissions it needs.
+# ---------------------------------------------------------------------------
+permissions: {}
+
+# ---------------------------------------------------------------------------
+# Only one release pipeline should run at a time. Never cancel an in-progress
+# release — it may have already uploaded partial assets.
+# ---------------------------------------------------------------------------
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # Job 1: Build ISO via the reusable build-iso workflow
+  # ===========================================================================
+  build:
+    name: Build ISO
+    uses: ./.github/workflows/build-iso.yml
+    with:
+      verify_reproducibility: true
+    secrets:
+      PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+
+  # ===========================================================================
+  # Job 2: Create GitHub Release with artifacts and attestation
+  # ===========================================================================
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write        # Create releases and tags
+      id-token: write        # OIDC token for attestation signing
+      attestations: write    # Publish attestation to GitHub
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout — required for `gh` CLI repository context
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # -----------------------------------------------------------------------
+      # 2. Download build artifacts produced by the build job
+      # -----------------------------------------------------------------------
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nails-os-iso-${{ github.sha }}
+          path: dist/
+
+      - name: Verify downloaded artifacts
+        run: |
+          echo "--- Downloaded artifacts ---"
+          ls -la dist/
+          echo ""
+
+          # Ensure at least one ISO file is present
+          if ! test -n "$(find dist -name '*.iso' -type f)"; then
+            echo "::error::No .iso file found in dist/"
+            exit 1
+          fi
+
+          # Ensure other critical files are present
+          for file in SHA256SUMS build-metadata.json; do
+            if [ ! -f "dist/${file}" ]; then
+              echo "::error::Missing required artifact: ${file}"
+              exit 1
+            fi
+          done
+
+          echo "All required artifacts present."
+          echo ""
+          echo "--- SHA256SUMS ---"
+          cat dist/SHA256SUMS
+          echo ""
+          echo "--- build-metadata.json ---"
+          cat dist/build-metadata.json
+
+      # -----------------------------------------------------------------------
+      # 3. Determine release metadata from trigger context
+      # -----------------------------------------------------------------------
+      - name: Determine release metadata
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_RELEASE_NAME: ${{ inputs.release_name }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          # --- Tag ---
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${INPUT_TAG}"
+          else
+            # Tag push: github.ref_name is the tag (e.g. v0.1.0)
+            TAG="${REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          # --- Version (strip leading 'v') ---
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # --- Release name ---
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${INPUT_RELEASE_NAME}" ]; then
+            RELEASE_NAME="${INPUT_RELEASE_NAME}"
+          else
+            RELEASE_NAME="NAILS OS ${TAG}"
+          fi
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+
+          # --- Pre-release flag ---
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            PRERELEASE="${INPUT_PRERELEASE}"
+          else
+            # Auto-detect pre-release from tag pattern (e.g. v0.1.0-rc1, v0.1.0-alpha)
+            if echo "${TAG}" | grep -qE '-(alpha|beta|rc|dev|preview)'; then
+              PRERELEASE="true"
+            else
+              PRERELEASE="false"
+            fi
+          fi
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+
+          # --- Extract build metadata for release notes ---
+          if [ -f dist/build-metadata.json ]; then
+            COMMIT_SHA=$(jq -r '.git.commit // "unknown"' dist/build-metadata.json)
+            BUILD_DATE=$(jq -r '.build.timestamp // "unknown"' dist/build-metadata.json)
+            NIX_VERSION=$(jq -r '.build.nix_version // "unknown"' dist/build-metadata.json)
+            NIXPKGS_REV=$(jq -r '.nixpkgs.revision // "unknown"' dist/build-metadata.json)
+            REPRODUCIBLE=$(jq -r '.reproducibility.l2_full_rebuild // .reproducibility.l1_same_store // "unknown"' dist/build-metadata.json)
+          else
+            COMMIT_SHA="${GIT_SHA}"
+            BUILD_DATE="unknown"
+            NIX_VERSION="unknown"
+            NIXPKGS_REV="unknown"
+            REPRODUCIBLE="unknown"
+          fi
+
+          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          echo "nix_version=${NIX_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "nixpkgs_rev=${NIXPKGS_REV}" >> "$GITHUB_OUTPUT"
+          echo "reproducible=${REPRODUCIBLE}" >> "$GITHUB_OUTPUT"
+
+          # --- Read SHA256SUMS for inclusion in release notes ---
+          SHA256SUMS_CONTENT=$(cat dist/SHA256SUMS)
+          # Use heredoc delimiter for multi-line output
+          {
+            echo "sha256sums<<EOFSHA"
+            echo "${SHA256SUMS_CONTENT}"
+            echo "EOFSHA"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "::notice::Release ${RELEASE_NAME} (${TAG}) — prerelease=${PRERELEASE}, reproducible=${REPRODUCIBLE}"
+
+      # -----------------------------------------------------------------------
+      # 4. Check repository visibility (attestation requires public repos)
+      # -----------------------------------------------------------------------
+      - name: Check repository visibility
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VISIBILITY=$(gh api "repos/${{ github.repository }}" --jq '.visibility')
+          echo "visibility=${VISIBILITY}" >> "$GITHUB_OUTPUT"
+
+          if [ "${VISIBILITY}" = "public" ]; then
+            echo "is_public=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Repository is public — attestation will be created."
+          else
+            echo "is_public=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Repository is ${VISIBILITY} — skipping attestation (requires public repo)."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 5. Create build provenance attestation (public repos only)
+      #    This cryptographically links the ISO artifact to this workflow run
+      #    using Sigstore-based OIDC signing.
+      # -----------------------------------------------------------------------
+      - name: Create artifact attestation
+        if: steps.repo.outputs.is_public == 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.iso
+
+      # -----------------------------------------------------------------------
+      # 6. Generate release notes body
+      # -----------------------------------------------------------------------
+      - name: Generate release notes
+        id: notes
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          COMMIT_SHA: ${{ steps.meta.outputs.commit_sha }}
+          BUILD_DATE: ${{ steps.meta.outputs.build_date }}
+          NIX_VERSION: ${{ steps.meta.outputs.nix_version }}
+          NIXPKGS_REV: ${{ steps.meta.outputs.nixpkgs_rev }}
+          REPRO_STATUS: ${{ steps.meta.outputs.reproducible }}
+          SHA256SUMS: ${{ steps.meta.outputs.sha256sums }}
+          IS_PUBLIC: ${{ steps.repo.outputs.is_public }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - << 'PYEOF'
+          import os
+
+          tag = os.environ["TAG"]
+          commit_sha = os.environ["COMMIT_SHA"]
+          commit_short = commit_sha[:7]
+          build_date = os.environ["BUILD_DATE"]
+          nix_version = os.environ["NIX_VERSION"]
+          nixpkgs_rev = os.environ["NIXPKGS_REV"]
+          repro_status = os.environ["REPRO_STATUS"]
+          sha256sums = os.environ["SHA256SUMS"]
+          is_public = os.environ["IS_PUBLIC"]
+          repository = os.environ["REPOSITORY"]
+
+          if repro_status == "true":
+              repro_badge = "Reproducible build verified"
+          elif repro_status == "false":
+              repro_badge = "Reproducibility verification failed"
+          else:
+              repro_badge = "Reproducibility status unknown"
+
+          if is_public == "true":
+              attestation = f"""### Attestation
+
+          Verify the build attestation (requires [GitHub CLI](https://cli.github.com/)):
+          ```bash
+          gh attestation verify <ISO_FILE> --repo {repository}
+          ```"""
+          else:
+              attestation = """### Attestation
+
+          > Build attestation is only available for public repositories.
+          > Verify integrity using the SHA256 checksums below."""
+
+          notes = f"""## NAILS OS {tag}
+
+          Privacy-focused operating system built on NixOS.
+
+          **Build Info:** {repro_badge} | Built on {build_date} | Commit [`{commit_short}`](https://github.com/{repository}/commit/{commit_sha})
+
+          ### Verification
+
+          Verify the ISO integrity:
+          ```bash
+          sha256sum -c SHA256SUMS
+          ```
+
+          **SHA256 Checksums:**
+          ```
+          {sha256sums}
+          ```
+
+          ### Build Provenance
+
+          See `build-metadata.json` for full build provenance information including:
+          - Git commit and ref
+          - Build server details
+          - Nix version and nixpkgs revision
+          - Reproducibility verification results
+
+          | Property | Value |
+          |---|---|
+          | **Commit** | `{commit_sha}` |
+          | **Nix version** | `{nix_version}` |
+          | **Nixpkgs revision** | `{nixpkgs_rev}` |
+          | **Reproducible** | {repro_status} |
+          | **Build date** | {build_date} |
+
+          {attestation}
+          """
+
+          # The triple-quoted f-string produces clean markdown since YAML
+          # strips the common indentation from the run block.
+
+          with open("release-notes.md", "w") as f:
+              f.write(notes)
+
+          print("--- Release Notes ---")
+          print(notes)
+          PYEOF
+
+      # -----------------------------------------------------------------------
+      # 7. Delete existing release if re-running (idempotent)
+      # -----------------------------------------------------------------------
+      - name: Delete existing release (if re-running)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+
+          # Attempt to delete an existing release for this tag (ignore errors)
+          if gh release view "${TAG}" &>/dev/null; then
+            echo "::warning::Existing release for ${TAG} found — deleting for re-creation."
+            gh release delete "${TAG}" --yes --cleanup-tag
+          else
+            echo "No existing release for ${TAG} — proceeding."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 8. Create the GitHub Release
+      # -----------------------------------------------------------------------
+      - name: Create GitHub Release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          # Build the gh release create command
+          GH_ARGS=(
+            "${TAG}"
+            --title "${RELEASE_NAME}"
+            --notes-file release-notes.md
+            --target "${TARGET_SHA}"
+          )
+
+          if [ "${PRERELEASE}" = "true" ]; then
+            GH_ARGS+=(--prerelease)
+          fi
+
+          # Attach all artifacts
+          GH_ARGS+=(
+            dist/*.iso
+            "dist/SHA256SUMS"
+            "dist/build-metadata.json"
+          )
+
+          echo "Creating release: gh release create ${GH_ARGS[*]}"
+          RELEASE_URL=$(gh release create "${GH_ARGS[@]}")
+          echo "release_url=${RELEASE_URL}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Release created at ${RELEASE_URL}"
+
+      # -----------------------------------------------------------------------
+      # 9. Write job summary with release details
+      # -----------------------------------------------------------------------
+      - name: Write job summary
+        env:
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          RELEASE_URL: ${{ steps.create_release.outputs.release_url }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          COMMIT_SHA: ${{ steps.meta.outputs.commit_sha }}
+          REPRODUCIBLE: ${{ steps.meta.outputs.reproducible }}
+          IS_PUBLIC: ${{ steps.repo.outputs.is_public }}
+        run: |
+          if [ "${IS_PUBLIC}" = "true" ]; then
+            ATTEST_STATUS="Created"
+          else
+            ATTEST_STATUS="Skipped (private repo)"
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          # Release Created
+
+          | | |
+          |---|---|
+          | **Release** | [${RELEASE_NAME}](${RELEASE_URL}) |
+          | **Tag** | \`${RELEASE_TAG}\` |
+          | **Pre-release** | ${PRERELEASE} |
+          | **Commit** | \`${COMMIT_SHA}\` |
+          | **Reproducible** | ${REPRODUCIBLE} |
+          | **Attestation** | ${ATTEST_STATUS} |
+
+          ### Assets
+          - \`*.iso\` (NAILS OS installer)
+          - \`SHA256SUMS\`
+          - \`build-metadata.json\`
+
+          ### Release URL
+          ${RELEASE_URL}
+          EOF

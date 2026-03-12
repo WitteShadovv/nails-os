@@ -1,59 +1,902 @@
+# =============================================================================
+# NAILS OS — ISO Build & Reproducibility Verification Workflow
+# =============================================================================
+#
+# Builds the NAILS OS privacy-focused ISO on ephemeral Hetzner Cloud servers.
+#
+# Architecture:
+#   1. create-runner  — Provisions a Hetzner Cloud server as a self-hosted
+#                       GitHub Actions runner with a 9-combo fallback strategy
+#                       (3 server types × 3 locations).
+#   2. build-and-verify — Builds the ISO, verifies reproducibility (L1 same-store
+#                         check + L2 full rebuild comparison), uploads artifacts.
+#   3. delete-runner  — Tears down the Hetzner server. Runs unconditionally to
+#                       prevent orphaned (billable) infrastructure.
+#
+# Reproducibility:
+#   - L1 (same-store): `nix-store --realise --check` — always runs, fast.
+#   - L2 (full rebuild): Garbage-collects the store, rebuilds from scratch,
+#     and compares SHA256 hashes. Runs on main pushes and when explicitly
+#     requested via workflow_dispatch/workflow_call. Skipped on PRs by default
+#     to save time and cost.
+#
+# Security notes:
+#   - PERSONAL_ACCESS_TOKEN is required for runner registration (repo scope).
+#   - HCLOUD_TOKEN is required for Hetzner API access.
+#   - accept-flake-config = false prevents untrusted flake configs from
+#     altering the Nix daemon configuration.
+#   - persist-credentials: false on checkout prevents token leakage.
+# =============================================================================
+
 name: Build NAILS OS ISO
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'nix-config/**'
+      - '.github/workflows/build-iso.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'nix-config/**'
+      - '.github/workflows/build-iso.yml'
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag (e.g. v0.1.0)"
-        required: true
-        type: string
-      release_name:
-        description: "Release name"
+      verify_reproducibility:
+        description: "Run reproducibility verification (doubles build time)"
         required: false
-        default: "NAILS OS ISO"
-        type: string
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      verify_reproducibility:
+        description: "Run reproducibility verification"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      PERSONAL_ACCESS_TOKEN:
+        required: true
+      HCLOUD_TOKEN:
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-iso-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-iso:
+  # ===========================================================================
+  # Job 1: Provision a Hetzner Cloud self-hosted runner
+  # ===========================================================================
+  # Tries 9 server_type × location combinations in sequence. Each combo gets
+  # ~60s of API retries before we move to the next. This handles transient
+  # capacity shortages gracefully.
+  #
+  # Fallback order (most powerful → most available):
+  #   ccx33 (8 dedicated vCPU, 32GB) → ccx23 (4 dedicated, 16GB) → cpx41 (8 shared, 16GB)
+  #   Locations: fsn1 (Falkenstein) → nbg1 (Nuremberg) → hel1 (Helsinki)
+  # ===========================================================================
+  create-runner:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      label: ${{ steps.determine-combo.outputs.label }}
+      server_id: ${{ steps.determine-combo.outputs.server_id }}
+      server_type: ${{ steps.determine-combo.outputs.server_type }}
+      location: ${{ steps.determine-combo.outputs.location }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # -----------------------------------------------------------------------
+      # Combo 1: ccx33 @ fsn1 (8 dedicated vCPU, 32GB RAM, 240GB SSD)
+      # -----------------------------------------------------------------------
+      - name: "Try combo 1: ccx33 @ fsn1"
+        id: combo-1
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: ccx33
+          server_location: fsn1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v12
+      # -----------------------------------------------------------------------
+      # Combo 2: ccx33 @ nbg1 (Nuremberg, DE)
+      # -----------------------------------------------------------------------
+      - name: "Try combo 2: ccx33 @ nbg1"
+        id: combo-2
+        if: steps.combo-1.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: ccx33
+          server_location: nbg1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
 
-      - name: Build ISO
+      # -----------------------------------------------------------------------
+      # Combo 3: ccx33 @ hel1 (Helsinki, FI)
+      # -----------------------------------------------------------------------
+      - name: "Try combo 3: ccx33 @ hel1"
+        id: combo-3
+        if: steps.combo-1.outcome == 'failure' && steps.combo-2.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: ccx33
+          server_location: hel1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Combo 4: ccx23 @ fsn1 (4 dedicated vCPU, 16GB RAM, 160GB SSD)
+      # -----------------------------------------------------------------------
+      - name: "Try combo 4: ccx23 @ fsn1"
+        id: combo-4
+        if: >-
+          steps.combo-1.outcome == 'failure' &&
+          steps.combo-2.outcome == 'failure' &&
+          steps.combo-3.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: ccx23
+          server_location: fsn1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Combo 5: ccx23 @ nbg1
+      # -----------------------------------------------------------------------
+      - name: "Try combo 5: ccx23 @ nbg1"
+        id: combo-5
+        if: >-
+          steps.combo-1.outcome == 'failure' &&
+          steps.combo-2.outcome == 'failure' &&
+          steps.combo-3.outcome == 'failure' &&
+          steps.combo-4.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: ccx23
+          server_location: nbg1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Combo 6: ccx23 @ hel1
+      # -----------------------------------------------------------------------
+      - name: "Try combo 6: ccx23 @ hel1"
+        id: combo-6
+        if: >-
+          steps.combo-1.outcome == 'failure' &&
+          steps.combo-2.outcome == 'failure' &&
+          steps.combo-3.outcome == 'failure' &&
+          steps.combo-4.outcome == 'failure' &&
+          steps.combo-5.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: ccx23
+          server_location: hel1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Combo 7: cpx41 @ fsn1 (8 shared vCPU, 16GB RAM, 240GB SSD)
+      # -----------------------------------------------------------------------
+      - name: "Try combo 7: cpx41 @ fsn1"
+        id: combo-7
+        if: >-
+          steps.combo-1.outcome == 'failure' &&
+          steps.combo-2.outcome == 'failure' &&
+          steps.combo-3.outcome == 'failure' &&
+          steps.combo-4.outcome == 'failure' &&
+          steps.combo-5.outcome == 'failure' &&
+          steps.combo-6.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: cpx41
+          server_location: fsn1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Combo 8: cpx41 @ nbg1
+      # -----------------------------------------------------------------------
+      - name: "Try combo 8: cpx41 @ nbg1"
+        id: combo-8
+        if: >-
+          steps.combo-1.outcome == 'failure' &&
+          steps.combo-2.outcome == 'failure' &&
+          steps.combo-3.outcome == 'failure' &&
+          steps.combo-4.outcome == 'failure' &&
+          steps.combo-5.outcome == 'failure' &&
+          steps.combo-6.outcome == 'failure' &&
+          steps.combo-7.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: cpx41
+          server_location: nbg1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Combo 9: cpx41 @ hel1 (last resort)
+      # -----------------------------------------------------------------------
+      - name: "Try combo 9: cpx41 @ hel1"
+        id: combo-9
+        if: >-
+          steps.combo-1.outcome == 'failure' &&
+          steps.combo-2.outcome == 'failure' &&
+          steps.combo-3.outcome == 'failure' &&
+          steps.combo-4.outcome == 'failure' &&
+          steps.combo-5.outcome == 'failure' &&
+          steps.combo-6.outcome == 'failure' &&
+          steps.combo-7.outcome == 'failure' &&
+          steps.combo-8.outcome == 'failure'
+        continue-on-error: true
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          server_type: cpx41
+          server_location: hel1
+          image: ubuntu-24.04
+          create_wait: '12'
+          server_wait: '30'
+          runner_wait: '120'
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          pre_runner_script: |
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+            mkdir -p /etc/nix
+            cat > /etc/nix/nix.conf << 'NIXCONF'
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
+            NIXCONF
+            systemctl restart nix-daemon
+
+      # -----------------------------------------------------------------------
+      # Determine which combo succeeded and export its outputs
+      # -----------------------------------------------------------------------
+      - name: Determine successful combo
+        id: determine-combo
         run: |
-          nix --version
-          nix build ./nix-config#nails-os-iso
-          ls -l result/iso
+          echo "::group::Evaluating combo results"
 
-      - name: Collect ISO
+          # Array of combo metadata: step_id|server_type|location
+          combos=(
+            "combo-1|ccx33|fsn1"
+            "combo-2|ccx33|nbg1"
+            "combo-3|ccx33|hel1"
+            "combo-4|ccx23|fsn1"
+            "combo-5|ccx23|nbg1"
+            "combo-6|ccx23|hel1"
+            "combo-7|cpx41|fsn1"
+            "combo-8|cpx41|nbg1"
+            "combo-9|cpx41|hel1"
+          )
+
+          # Step outcomes from GitHub context
+          outcomes=(
+            "${{ steps.combo-1.outcome }}"
+            "${{ steps.combo-2.outcome }}"
+            "${{ steps.combo-3.outcome }}"
+            "${{ steps.combo-4.outcome }}"
+            "${{ steps.combo-5.outcome }}"
+            "${{ steps.combo-6.outcome }}"
+            "${{ steps.combo-7.outcome }}"
+            "${{ steps.combo-8.outcome }}"
+            "${{ steps.combo-9.outcome }}"
+          )
+
+          # Step output values (label and server_id from the action)
+          labels=(
+            "${{ steps.combo-1.outputs.label }}"
+            "${{ steps.combo-2.outputs.label }}"
+            "${{ steps.combo-3.outputs.label }}"
+            "${{ steps.combo-4.outputs.label }}"
+            "${{ steps.combo-5.outputs.label }}"
+            "${{ steps.combo-6.outputs.label }}"
+            "${{ steps.combo-7.outputs.label }}"
+            "${{ steps.combo-8.outputs.label }}"
+            "${{ steps.combo-9.outputs.label }}"
+          )
+
+          server_ids=(
+            "${{ steps.combo-1.outputs.server_id }}"
+            "${{ steps.combo-2.outputs.server_id }}"
+            "${{ steps.combo-3.outputs.server_id }}"
+            "${{ steps.combo-4.outputs.server_id }}"
+            "${{ steps.combo-5.outputs.server_id }}"
+            "${{ steps.combo-6.outputs.server_id }}"
+            "${{ steps.combo-7.outputs.server_id }}"
+            "${{ steps.combo-8.outputs.server_id }}"
+            "${{ steps.combo-9.outputs.server_id }}"
+          )
+
+          found=false
+          for i in "${!combos[@]}"; do
+            IFS='|' read -r step_id server_type location <<< "${combos[$i]}"
+            outcome="${outcomes[$i]}"
+            echo "  $step_id ($server_type @ $location): $outcome"
+
+            if [[ "$outcome" == "success" && "$found" == "false" ]]; then
+              found=true
+              echo "✅ Using $step_id: $server_type @ $location"
+              echo "label=${labels[$i]}" >> "$GITHUB_OUTPUT"
+              echo "server_id=${server_ids[$i]}" >> "$GITHUB_OUTPUT"
+              echo "server_type=$server_type" >> "$GITHUB_OUTPUT"
+              echo "location=$location" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+          echo "::endgroup::"
+
+          if [[ "$found" == "false" ]]; then
+            echo "::error::All 9 server combos failed. Unable to provision a runner."
+            echo "Check Hetzner Cloud capacity and API token validity."
+            exit 1
+          fi
+
+      # -----------------------------------------------------------------------
+      # Cleanup orphaned servers from failed combos
+      # -----------------------------------------------------------------------
+      # A combo can fail *after* the server was created (e.g., runner registration
+      # timeout). We must delete those servers to avoid billing leaks.
+      # -----------------------------------------------------------------------
+      - name: Cleanup orphaned servers from failed combos
+        if: always()
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          echo "::group::Cleaning up orphaned servers"
+
+          # The successful combo's server_id (keep this one alive)
+          KEEP_SERVER_ID="${{ steps.determine-combo.outputs.server_id }}"
+
+          # All server IDs from all combos (empty string if combo was skipped)
+          all_server_ids=(
+            "${{ steps.combo-1.outputs.server_id }}"
+            "${{ steps.combo-2.outputs.server_id }}"
+            "${{ steps.combo-3.outputs.server_id }}"
+            "${{ steps.combo-4.outputs.server_id }}"
+            "${{ steps.combo-5.outputs.server_id }}"
+            "${{ steps.combo-6.outputs.server_id }}"
+            "${{ steps.combo-7.outputs.server_id }}"
+            "${{ steps.combo-8.outputs.server_id }}"
+            "${{ steps.combo-9.outputs.server_id }}"
+          )
+
+          for sid in "${all_server_ids[@]}"; do
+            # Skip empty IDs (combo was skipped or didn't create a server)
+            if [[ -z "$sid" ]]; then
+              continue
+            fi
+            # Skip the server we're keeping for the build
+            if [[ "$sid" == "$KEEP_SERVER_ID" ]]; then
+              echo "  Keeping server $sid (active runner)"
+              continue
+            fi
+            echo "  Deleting orphaned server $sid..."
+            for attempt in 1 2 3; do
+              http_code=$(curl -s -X DELETE \
+                -H "Authorization: Bearer $HCLOUD_TOKEN" \
+                "https://api.hetzner.cloud/v1/servers/$sid" \
+                -o /dev/null -w "%{http_code}")
+              if [[ "$http_code" =~ ^(200|204|404)$ ]]; then
+                echo "  HTTP $http_code — server $sid deleted (attempt $attempt)"
+                break
+              fi
+              echo "  HTTP $http_code — attempt $attempt failed, retrying in 5s..."
+              sleep 5
+            done
+          done
+
+          echo "::endgroup::"
+
+  # ===========================================================================
+  # Job 2: Build the ISO and verify reproducibility
+  # ===========================================================================
+  build-and-verify:
+    needs: create-runner
+    runs-on: ${{ needs.create-runner.outputs.label }}
+    timeout-minutes: 180
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # -----------------------------------------------------------------------
+      # Verify Nix installation
+      # -----------------------------------------------------------------------
+      - name: Verify Nix installation
+        run: |
+          echo "::group::Nix version"
+          nix --version
+          echo "::endgroup::"
+
+          echo "::group::Nix configuration"
+          nix show-config 2>/dev/null | grep -E '(experimental-features|max-jobs|cores|sandbox)' || true
+          echo "::endgroup::"
+
+          echo "::group::Disk space"
+          df -h / /nix 2>/dev/null || df -h /
+          echo "::endgroup::"
+
+          echo "::group::System info"
+          echo "CPUs: $(nproc)"
+          echo "RAM: $(free -h | awk '/^Mem:/{print $2}')"
+          echo "Server type: ${{ needs.create-runner.outputs.server_type }}"
+          echo "Location: ${{ needs.create-runner.outputs.location }}"
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
+      # Build the ISO (canonical build)
+      # -----------------------------------------------------------------------
+      - name: Build NAILS OS ISO (canonical)
+        id: build-iso
+        run: |
+          echo "::group::Building ISO"
+          build_start=$(date +%s)
+
+          nix build ./nix-config#nails-os-iso -L
+
+          build_end=$(date +%s)
+          build_duration=$((build_end - build_start))
+          echo "Build completed in ${build_duration}s ($(( build_duration / 60 ))m $(( build_duration % 60 ))s)"
+          echo "::endgroup::"
+
+          # Locate the ISO dynamically (filename includes NixOS version, nixpkgs rev, arch)
+          ISO_PATH=$(find result/iso -name '*.iso' -type f | head -1)
+          if [[ -z "$ISO_PATH" || ! -f "$ISO_PATH" ]]; then
+            echo "::error::No ISO found in result/iso/"
+            ls -la result/ result/iso/ 2>/dev/null || true
+            exit 1
+          fi
+          ISO_FILENAME=$(basename "$ISO_PATH")
+
+          ISO_SIZE=$(stat -c%s "$ISO_PATH")
+          ISO_SHA256=$(sha256sum "$ISO_PATH" | awk '{print $1}')
+
+          echo "ISO path: $ISO_PATH"
+          echo "ISO filename: $ISO_FILENAME"
+          echo "ISO size: $(( ISO_SIZE / 1048576 )) MB ($ISO_SIZE bytes)"
+          echo "ISO SHA256: $ISO_SHA256"
+
+          echo "iso_path=$ISO_PATH" >> "$GITHUB_OUTPUT"
+          echo "iso_filename=$ISO_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "iso_sha256=$ISO_SHA256" >> "$GITHUB_OUTPUT"
+          echo "iso_size=$ISO_SIZE" >> "$GITHUB_OUTPUT"
+          echo "build_duration=$build_duration" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # L1: Same-store reproducibility check
+      # -----------------------------------------------------------------------
+      # Fast check: asks Nix to re-derive the output and verify it matches
+      # what's already in the store. Catches non-deterministic build steps.
+      # -----------------------------------------------------------------------
+      - name: "Verify same-store reproducibility (L1)"
+        id: l1-check
+        continue-on-error: true
+        run: |
+          echo "::group::L1 same-store reproducibility check"
+
+          if ! command -v nix-store &>/dev/null; then
+            echo "::warning::nix-store not found in PATH — skipping L1 check"
+            echo "l1_result=skipped" >> "$GITHUB_OUTPUT"
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          DRV=$(nix path-info --derivation ./nix-config#nails-os-iso)
+          echo "Derivation: $DRV"
+
+          nix-store --realise "$DRV" --check -K 2>&1 | tee /tmp/nix-store-check.log
+
+          exit_code=${PIPESTATUS[0]}
+          if [[ $exit_code -eq 0 ]]; then
+            echo "✅ L1 check passed: store outputs are reproducible"
+            echo "l1_result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ L1 check found differences (exit code: $exit_code)"
+            echo "l1_result=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
+      # L2: Full rebuild reproducibility verification
+      # -----------------------------------------------------------------------
+      # Expensive check: clears the Nix store and rebuilds from scratch, then
+      # compares the resulting ISO byte-for-byte with the canonical build.
+      # Only runs on main pushes or when explicitly requested.
+      # -----------------------------------------------------------------------
+      - name: "Verify rebuild reproducibility (L2)"
+        id: l2-check
+        continue-on-error: true
+        if: >-
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'workflow_dispatch' && inputs.verify_reproducibility != false) ||
+          (github.event_name == 'workflow_call' && inputs.verify_reproducibility != false)
+        run: |
+          echo "::group::L2 full rebuild reproducibility verification"
+          CANONICAL_HASH="${{ steps.build-iso.outputs.iso_sha256 }}"
+
+          # Preserve the canonical ISO
+          echo "Copying canonical ISO to /tmp..."
+          cp "${{ steps.build-iso.outputs.iso_path }}" /tmp/canonical.iso
+
+          # Clear the Nix store to force a full rebuild
+          echo "Removing result symlink..."
+          rm -f result
+          rm -rf /nix/var/nix/gcroots/auto/* 2>/dev/null || true
+
+          echo "Running garbage collection..."
+          nix-collect-garbage -d 2>&1 | tail -5
+
+          echo "Disk space after GC:"
+          df -h / /nix 2>/dev/null || df -h /
+
+          # Rebuild from scratch
+          echo "Rebuilding ISO from clean store..."
+          rebuild_start=$(date +%s)
+
+          nix build ./nix-config#nails-os-iso -L
+
+          rebuild_end=$(date +%s)
+          rebuild_duration=$((rebuild_end - rebuild_start))
+          echo "Rebuild completed in ${rebuild_duration}s ($(( rebuild_duration / 60 ))m $(( rebuild_duration % 60 ))s)"
+
+          # Compare hashes - find rebuilt ISO dynamically
+          REBUILD_ISO_PATH=$(find result/iso -name '*.iso' -type f | head -1)
+          if [[ -z "$REBUILD_ISO_PATH" || ! -f "$REBUILD_ISO_PATH" ]]; then
+            echo "::error::No ISO found in result/iso/ after rebuild"
+            ls -la result/ result/iso/ 2>/dev/null || true
+            echo "reproducible=error" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          REBUILD_HASH=$(sha256sum "$REBUILD_ISO_PATH" | awk '{print $1}')
+
+          echo ""
+          echo "Canonical SHA256: $CANONICAL_HASH"
+          echo "Rebuild  SHA256: $REBUILD_HASH"
+          echo ""
+
+          if [[ "$CANONICAL_HASH" == "$REBUILD_HASH" ]]; then
+            echo "✅ L2 check passed: ISO is reproducible across clean rebuilds"
+            echo "reproducible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::L2 check FAILED: ISO differs between builds"
+            echo "reproducible=false" >> "$GITHUB_OUTPUT"
+
+            # Generate diffoscope report for debugging
+            echo "Running diffoscope to analyze differences..."
+            nix shell nixpkgs#diffoscope -c diffoscope \
+              /tmp/canonical.iso \
+              "$REBUILD_ISO_PATH" \
+              --html /tmp/diffoscope-report.html \
+              --max-report-size 52428800 || true
+
+            if [[ -f /tmp/diffoscope-report.html ]]; then
+              echo "Diffoscope report generated at /tmp/diffoscope-report.html"
+              echo "diffoscope_report=/tmp/diffoscope-report.html" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
+      # Collect artifacts into dist/
+      # -----------------------------------------------------------------------
+      - name: Collect artifacts
         run: |
           mkdir -p dist
           cp result/iso/*.iso dist/
+          (cd dist && sha256sum *.iso > SHA256SUMS)
+          echo "Contents of dist/:"
+          ls -lh dist/
 
-      - name: Generate SHA256
+      # -----------------------------------------------------------------------
+      # Generate build metadata
+      # -----------------------------------------------------------------------
+      - name: Generate build metadata
         run: |
-          cd dist
-          sha256sum *.iso > SHA256SUMS
+          # Extract nixpkgs revision from flake.lock
+          NIXPKGS_REV="unknown"
+          if [[ -f nix-config/flake.lock ]]; then
+            NIXPKGS_REV=$(
+              python3 -c "
+          import json, sys
+          with open('nix-config/flake.lock') as f:
+              lock = json.load(f)
+          nodes = lock.get('nodes', {})
+          nixpkgs = nodes.get('nixpkgs', {})
+          locked = nixpkgs.get('locked', {})
+          print(locked.get('rev', 'unknown'))
+          " 2>/dev/null || echo "unknown"
+            )
+          fi
 
-      - name: Upload ISO artifact
+          # Determine reproducibility status
+          L1_RESULT="${{ steps.l1-check.outputs.l1_result }}"
+          L2_RESULT="${{ steps.l2-check.outputs.reproducible }}"
+
+          if [[ -z "$L2_RESULT" ]]; then
+            L2_RESULT="skipped"
+          fi
+
+          # Ensure numeric fields have fallback values to prevent invalid JSON
+          BUILD_DURATION="${{ steps.build-iso.outputs.build_duration }}"
+          BUILD_DURATION="${BUILD_DURATION:-0}"
+          ISO_SIZE="${{ steps.build-iso.outputs.iso_size }}"
+          ISO_SIZE="${ISO_SIZE:-0}"
+
+          cat > dist/build-metadata.json << METADATA
+          {
+            "project": "NAILS OS",
+            "version": "$(git describe --tags --always --dirty 2>/dev/null || echo 'untagged')",
+            "git": {
+              "commit": "${{ github.sha }}",
+              "ref": "${{ github.ref }}",
+              "ref_name": "${{ github.ref_name }}",
+              "repository": "${{ github.repository }}"
+            },
+            "build": {
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "duration_seconds": ${BUILD_DURATION},
+              "server_type": "${{ needs.create-runner.outputs.server_type }}",
+              "location": "${{ needs.create-runner.outputs.location }}",
+              "nix_version": "$(nix --version 2>/dev/null | head -1)",
+              "runner_label": "${{ needs.create-runner.outputs.label }}"
+            },
+            "iso": {
+              "filename": "${{ steps.build-iso.outputs.iso_filename }}",
+              "sha256": "${{ steps.build-iso.outputs.iso_sha256 }}",
+              "size_bytes": ${ISO_SIZE}
+            },
+            "reproducibility": {
+              "l1_same_store": "${L1_RESULT:-unknown}",
+              "l2_full_rebuild": "${L2_RESULT}"
+            },
+            "workflow": {
+              "run_id": "${{ github.run_id }}",
+              "run_number": "${{ github.run_number }}",
+              "run_attempt": "${{ github.run_attempt }}",
+              "event_name": "${{ github.event_name }}",
+              "triggered_by": "${{ github.actor }}"
+            },
+            "nixpkgs": {
+              "revision": "${NIXPKGS_REV}"
+            }
+          }
+          METADATA
+
+          echo "Build metadata:"
+          cat dist/build-metadata.json
+
+      # -----------------------------------------------------------------------
+      # Upload diffoscope report (only if L2 found differences)
+      # -----------------------------------------------------------------------
+      - name: Upload diffoscope report
+        if: steps.l2-check.outputs.reproducible == 'false' && steps.l2-check.outputs.diffoscope_report != ''
         uses: actions/upload-artifact@v4
         with:
-          name: nails-os-iso
+          name: diffoscope-report-${{ github.sha }}
+          path: /tmp/diffoscope-report.html
+          retention-days: 30
+
+      # -----------------------------------------------------------------------
+      # Upload ISO and build artifacts
+      # -----------------------------------------------------------------------
+      - name: Upload ISO artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nails-os-iso-${{ github.sha }}
           path: dist/*
+          retention-days: 90
+          compression-level: 0
           if-no-files-found: error
 
-      - name: Create GitHub Release and upload assets
-        uses: softprops/action-gh-release@v2
+      # -----------------------------------------------------------------------
+      # Job summary
+      # -----------------------------------------------------------------------
+      - name: Write job summary
+        if: always()
+        run: |
+          L1_RESULT="${{ steps.l1-check.outputs.l1_result }}"
+          L2_RESULT="${{ steps.l2-check.outputs.reproducible }}"
+          L1_ICON="❓"; L2_ICON="❓"
+          [[ "$L1_RESULT" == "pass" ]] && L1_ICON="✅"
+          [[ "$L1_RESULT" == "fail" ]] && L1_ICON="❌"
+          [[ "$L1_RESULT" == "skipped" ]] && L1_ICON="⏭️"
+          [[ "$L2_RESULT" == "true" ]] && L2_ICON="✅"
+          [[ "$L2_RESULT" == "false" ]] && L2_ICON="❌"
+          [[ -z "$L2_RESULT" || "$L2_RESULT" == "skipped" ]] && L2_ICON="⏭️"
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## NAILS OS Build Summary
+
+          | Property | Value |
+          |----------|-------|
+          | **ISO filename** | \`${{ steps.build-iso.outputs.iso_filename }}\` |
+          | **ISO SHA256** | \`${{ steps.build-iso.outputs.iso_sha256 }}\` |
+          | **ISO size** | $(( ${{ steps.build-iso.outputs.iso_size || 0 }} / 1048576 )) MB |
+          | **Build duration** | ${{ steps.build-iso.outputs.build_duration }}s |
+          | **Server** | ${{ needs.create-runner.outputs.server_type }} @ ${{ needs.create-runner.outputs.location }} |
+          | **L1 (same-store)** | ${L1_ICON} ${L1_RESULT:-not run} |
+          | **L2 (full rebuild)** | ${L2_ICON} ${L2_RESULT:-not run} |
+          | **Commit** | \`${{ github.sha }}\` |
+          | **Ref** | \`${{ github.ref_name }}\` |
+          EOF
+
+  # ===========================================================================
+  # Job 3: Destroy the Hetzner Cloud server
+  # ===========================================================================
+  # MUST run unconditionally (if: always()) to prevent orphaned servers that
+  # would continue to accrue charges. This is the billing safety net.
+  # ===========================================================================
+  delete-runner:
+    needs: [create-runner, build-and-verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: always()
+    steps:
+      - name: Delete Hetzner Cloud runner
+        if: needs.create-runner.outputs.server_id != ''
+        uses: Cyclenerd/hcloud-github-runner@v1
         with:
-          tag_name: ${{ inputs.tag }}
-          name: ${{ inputs.release_name }}
-          files: |
-            dist/*.iso
-            dist/SHA256SUMS
+          mode: delete
+          name: ${{ needs.create-runner.outputs.label }}
+          server_id: ${{ needs.create-runner.outputs.server_id }}
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
