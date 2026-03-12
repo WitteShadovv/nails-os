@@ -90,6 +90,79 @@ jobs:
       location: ${{ steps.determine-combo.outputs.location }}
     steps:
       # -----------------------------------------------------------------------
+      # Budget check: estimate current Hetzner project spend from running servers
+      # -----------------------------------------------------------------------
+      - name: Check Hetzner cost budget
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Mask the token just in case
+          [[ -n "${HCLOUD_TOKEN:-}" ]] && echo "::add-mask::$HCLOUD_TOKEN"
+
+          BUDGET_EUR="20.00"
+
+          # Get all servers in the project
+          if ! SERVERS=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $HCLOUD_TOKEN" \
+            "https://api.hetzner.cloud/v1/servers?per_page=50"); then
+            echo "::warning::Failed to query Hetzner servers API. Skipping budget check."
+            SERVERS='{"servers":[]}'
+          fi
+
+          # Get pricing catalog
+          if ! PRICING=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $HCLOUD_TOKEN" \
+            "https://api.hetzner.cloud/v1/pricing"); then
+            echo "::warning::Failed to query Hetzner pricing API. Skipping budget check."
+            PRICING='{"pricing":{"server_types":[],"primary_ips":[]}}'
+          fi
+
+          # Calculate estimated cost from running servers
+          TOTAL_COST=$(echo "$SERVERS" | jq -r --argjson pricing "$PRICING" '
+            [.servers[] |
+              # Get server creation time and compute hours (rounded up, minimum 1)
+              (.created | sub("\\+00:00$"; "Z") | fromdateiso8601) as $created |
+              ((now - $created) / 3600 | ceil | if . < 1 then 1 else . end) as $hours |
+              .server_type.name as $type |
+              .location.name as $loc |
+              # Find hourly price for this server type and location
+              ($pricing.pricing.server_types[] | select(.name == $type) |
+                .prices[] | select(.location == $loc) |
+                .price_hourly.gross | tonumber) as $hourly |
+              ($hours * $hourly)
+            ] | add // 0
+          ')
+
+          # Add Primary IPv4 costs
+          IPV4_COST=$(echo "$SERVERS" | jq -r --argjson pricing "$PRICING" '
+            [.servers[] |
+              select(.public_net.ipv4.ip != null) |
+              (.created | sub("\\+00:00$"; "Z") | fromdateiso8601) as $created |
+              ((now - $created) / 3600 | ceil | if . < 1 then 1 else . end) as $hours |
+              .location.name as $loc |
+              ($pricing.pricing.primary_ips[] | select(.type == "ipv4") |
+                .prices[] | select(.location == $loc) |
+                .price_hourly.gross | tonumber) as $ipv4_hourly |
+              ($hours * $ipv4_hourly)
+            ] | add // 0
+          ')
+
+          ESTIMATED_COST=$(awk "BEGIN {printf \"%.10f\", $TOTAL_COST + $IPV4_COST}")
+          ESTIMATED_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ESTIMATED_COST}")
+
+          echo "Estimated current Hetzner project cost: €$ESTIMATED_COST_FMT (budget: €$BUDGET_EUR)"
+          echo "Note: This is an estimate based on currently running servers only."
+
+          # Compare against budget
+          if awk "BEGIN {exit !($ESTIMATED_COST > $BUDGET_EUR)}"; then
+            echo "::error::Monthly Hetzner spend estimate (~€$ESTIMATED_COST_FMT) exceeds €$BUDGET_EUR budget. Aborting to prevent overspend."
+            exit 1
+          fi
+
+          echo "✓ Within budget (€$ESTIMATED_COST_FMT / €$BUDGET_EUR)"
+
+      # -----------------------------------------------------------------------
       # Combo 1: ccx33 @ nbg1 (8 dedicated vCPU, 32GB RAM, 240GB SSD)
       # -----------------------------------------------------------------------
       - name: "Try combo 1: ccx33 @ nbg1"
@@ -893,6 +966,81 @@ jobs:
           if-no-files-found: error
 
       # -----------------------------------------------------------------------
+      # Calculate session cost for summary
+      # -----------------------------------------------------------------------
+      - name: Calculate session cost
+        if: always()
+        id: session-cost
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${HCLOUD_TOKEN:-}" ]] && echo "::add-mask::$HCLOUD_TOKEN"
+
+          SERVER_TYPE="${{ needs.create-runner.outputs.server_type }}"
+          LOCATION="${{ needs.create-runner.outputs.location }}"
+          SERVER_ID="${{ needs.create-runner.outputs.server_id }}"
+
+          if [ -z "$SERVER_TYPE" ] || [ -z "$LOCATION" ] || [ -z "$SERVER_ID" ]; then
+            echo "Missing server info, skipping cost calculation"
+            echo "session_cost_eur=0.0000" >> "$GITHUB_OUTPUT"
+            echo "session_hours=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Get server creation time
+          if ! SERVER_INFO=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $HCLOUD_TOKEN" \
+            "https://api.hetzner.cloud/v1/servers/$SERVER_ID"); then
+            echo "::warning::Failed to query Hetzner server info API. Skipping cost calculation."
+            SERVER_INFO='{}'
+          fi
+
+          CREATED=$(echo "$SERVER_INFO" | jq -r '.server.created // empty' 2>/dev/null || true)
+          HAS_IPV4=$(echo "$SERVER_INFO" | jq -r '.server.public_net.ipv4.ip // empty' 2>/dev/null || true)
+
+          if [ -z "$CREATED" ]; then
+            echo "Could not get server creation time, defaulting to minimum billing unit (1h)"
+            ELAPSED_HOURS=1
+          else
+            CREATED_TS=$(date -d "$CREATED" +%s 2>/dev/null || date -u +%s)
+            NOW_TS=$(date -u +%s)
+            ELAPSED_SECONDS=$((NOW_TS - CREATED_TS))
+            ELAPSED_HOURS=$(( (ELAPSED_SECONDS + 3599) / 3600 ))
+            [ "$ELAPSED_HOURS" -lt 1 ] && ELAPSED_HOURS=1
+          fi
+
+          # Get pricing
+          if ! PRICING=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $HCLOUD_TOKEN" \
+            "https://api.hetzner.cloud/v1/pricing"); then
+            echo "::warning::Failed to query Hetzner pricing API. Skipping cost calculation."
+            PRICING='{"pricing":{"server_types":[],"primary_ips":[]}}'
+          fi
+
+          HOURLY_RATE=$(echo "$PRICING" | jq -r --arg type "$SERVER_TYPE" --arg loc "$LOCATION" '
+            .pricing.server_types[] | select(.name == $type) |
+            .prices[] | select(.location == $loc) |
+            .price_hourly.gross' 2>/dev/null || echo "0")
+          HOURLY_RATE="${HOURLY_RATE:-0}"
+
+          IPV4_HOURLY="0"
+          if [ -n "$HAS_IPV4" ]; then
+            IPV4_HOURLY=$(echo "$PRICING" | jq -r --arg loc "$LOCATION" '
+              .pricing.primary_ips[] | select(.type == "ipv4") |
+              .prices[] | select(.location == $loc) |
+              .price_hourly.gross' 2>/dev/null || echo "0")
+          fi
+          IPV4_HOURLY="${IPV4_HOURLY:-0}"
+
+          SESSION_COST=$(awk "BEGIN {printf \"%.10f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
+          SESSION_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
+
+          echo "Session: ${ELAPSED_HOURS}h × (€$HOURLY_RATE server + €$IPV4_HOURLY IPv4) = €$SESSION_COST_FMT"
+          echo "session_cost_eur=$SESSION_COST_FMT" >> "$GITHUB_OUTPUT"
+          echo "session_hours=$ELAPSED_HOURS" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
       # Job summary
       # -----------------------------------------------------------------------
       - name: Write job summary
@@ -920,6 +1068,7 @@ jobs:
           printf '| **L2 (full rebuild)** | %s %s |\n' "${L2_ICON}" "${L2_RESULT:-not run}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **Commit** | `%s` |\n' "${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **Ref** | `%s` |\n' "${{ github.ref_name }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Session cost** | ~€%s (%sh) |\n' "${{ steps.session-cost.outputs.session_cost_eur }}" "${{ steps.session-cost.outputs.session_hours }}" >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
   # Job 2b: Publish rolling "latest" release (push to main only)
@@ -1019,6 +1168,102 @@ jobs:
     timeout-minutes: 15
     if: always()
     steps:
+      - name: Track cumulative cost
+        if: needs.create-runner.outputs.server_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${HCLOUD_TOKEN:-}" ]] && echo "::add-mask::$HCLOUD_TOKEN"
+          [[ -n "${GH_TOKEN:-}" ]] && echo "::add-mask::$GH_TOKEN"
+
+          SERVER_TYPE="${{ needs.create-runner.outputs.server_type }}"
+          LOCATION="${{ needs.create-runner.outputs.location }}"
+          SERVER_ID="${{ needs.create-runner.outputs.server_id }}"
+          REPO="${{ github.repository }}"
+
+          # Calculate this session's cost
+          if ! SERVER_INFO=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $HCLOUD_TOKEN" \
+            "https://api.hetzner.cloud/v1/servers/$SERVER_ID"); then
+            echo "::warning::Failed to query Hetzner server info API. Using defaults."
+            SERVER_INFO='{}'
+          fi
+
+          CREATED=$(echo "$SERVER_INFO" | jq -r '.server.created // empty' 2>/dev/null || true)
+          HAS_IPV4=$(echo "$SERVER_INFO" | jq -r '.server.public_net.ipv4.ip // empty' 2>/dev/null || true)
+
+          if [ -z "$CREATED" ]; then
+            echo "Could not determine server creation time, using 1h estimate"
+            ELAPSED_HOURS=1
+          else
+            CREATED_TS=$(date -d "$CREATED" +%s 2>/dev/null || date -u +%s)
+            NOW_TS=$(date -u +%s)
+            ELAPSED_SECONDS=$((NOW_TS - CREATED_TS))
+            ELAPSED_HOURS=$(( (ELAPSED_SECONDS + 3599) / 3600 ))
+            [ "$ELAPSED_HOURS" -lt 1 ] && ELAPSED_HOURS=1
+          fi
+
+          if ! PRICING=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $HCLOUD_TOKEN" \
+            "https://api.hetzner.cloud/v1/pricing"); then
+            echo "::warning::Failed to query Hetzner pricing API. Using defaults."
+            PRICING='{"pricing":{"server_types":[],"primary_ips":[]}}'
+          fi
+
+          HOURLY_RATE=$(echo "$PRICING" | jq -r --arg type "$SERVER_TYPE" --arg loc "$LOCATION" '
+            .pricing.server_types[] | select(.name == $type) |
+            .prices[] | select(.location == $loc) |
+            .price_hourly.gross' 2>/dev/null || echo "0")
+          HOURLY_RATE="${HOURLY_RATE:-0}"
+
+          IPV4_HOURLY="0"
+          if [ -n "$HAS_IPV4" ]; then
+            IPV4_HOURLY=$(echo "$PRICING" | jq -r --arg loc "$LOCATION" '
+              .pricing.primary_ips[] | select(.type == "ipv4") |
+              .prices[] | select(.location == $loc) |
+              .price_hourly.gross' 2>/dev/null || echo "0")
+          fi
+          IPV4_HOURLY="${IPV4_HOURLY:-0}"
+
+          SESSION_COST=$(awk "BEGIN {printf \"%.10f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
+          SESSION_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
+
+          # Read current cumulative cost from GitHub variable
+          CURRENT_TOTAL=$(gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
+            --jq '.value' 2>/dev/null || echo "0.0000")
+
+          # Calculate new total
+          NEW_TOTAL=$(awk "BEGIN {printf \"%.10f\", $CURRENT_TOTAL + $SESSION_COST}")
+          NEW_TOTAL_FMT=$(awk "BEGIN {printf \"%.4f\", $CURRENT_TOTAL + $SESSION_COST}")
+
+          echo "Session cost: €$SESSION_COST_FMT (${ELAPSED_HOURS}h × $SERVER_TYPE @ $LOCATION)"
+          echo "Previous cumulative: €$CURRENT_TOTAL"
+          echo "New cumulative: €$NEW_TOTAL_FMT"
+
+          # Update the repository variable (create if it doesn't exist)
+          if gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" &>/dev/null; then
+            gh api -X PATCH "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
+              -f value="$NEW_TOTAL_FMT"
+          else
+            gh api -X POST "repos/$REPO/actions/variables" \
+              -f name="HETZNER_CUMULATIVE_COST_EUR" \
+              -f value="$NEW_TOTAL_FMT"
+          fi
+
+          # Write cost summary to job summary
+          {
+            printf '## Cost Summary\n\n'
+            printf '| Metric | Value |\n'
+            printf '|--------|-------|\n'
+            printf '| **This session** | ~€%s (%sh × %s @ %s) |\n' "$SESSION_COST_FMT" "$ELAPSED_HOURS" "$SERVER_TYPE" "$LOCATION"
+            printf '| **Cumulative total** | ~€%s |\n' "$NEW_TOTAL_FMT"
+            printf '| **Budget** | €20.00 |\n'
+            printf '| **Budget remaining** | ~€%s |\n' "$(awk "BEGIN {printf \"%.4f\", 20.00 - $NEW_TOTAL}")"
+            printf '\n> Estimates based on Hetzner pricing API. Actual invoiced amounts may differ.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Delete Hetzner Cloud runner
         if: needs.create-runner.outputs.server_id != ''
         uses: Cyclenerd/hcloud-github-runner@1d464319145d45966cd0344f3e2038cf2152dc1d  # v1.3.0

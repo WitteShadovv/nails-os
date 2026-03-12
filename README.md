@@ -22,6 +22,7 @@ Designed for journalists, activists, researchers, and anyone who needs to leave 
 - [Persistence Model](#persistence-model)
 - [CI/CD Pipeline](#cicd-pipeline)
 - [Repository Setup for CI/CD](#repository-setup-for-cicd)
+- [Cost Tracking & Budget Protection](#cost-tracking--budget-protection)
 - [Repository Structure](#repository-structure)
 - [Contributing](#contributing)
 - [Acknowledgments](#acknowledgments)
@@ -173,6 +174,35 @@ Configure under Settings > Secrets and variables > Actions > Variables:
 | `HCLOUD_SSH_KEY_ID` | **Numeric ID** of an SSH key uploaded to your Hetzner Cloud project. When set, the build server is provisioned with this key and Hetzner will not email a root password. If omitted, the pipeline still works but Hetzner sends a root password email for every build. |
 
 **Important:** `HCLOUD_SSH_KEY_ID` requires the **numeric ID** of the SSH key — not its name or fingerprint. To find it: go to [Hetzner Cloud Console](https://console.hetzner.cloud) > your project > Security > SSH Keys, click the key, and copy the ID shown in the URL or key details (a number like `12345678`).
+
+## Cost Tracking & Budget Protection
+
+The CI pipeline includes automatic Hetzner Cloud cost tracking to prevent runaway spending.
+
+### Budget gate (€20/month)
+
+Before provisioning a build server, the pipeline queries the Hetzner Cloud API to estimate current project spending based on all running servers. If the estimate exceeds **€20 (gross)**, the workflow aborts immediately — no server is created.
+
+> **Note:** This is an estimate based on currently running servers, not Hetzner's actual billing. It serves as a safety net against accidental resource leaks or runaway builds.
+
+### Session cost reporting
+
+After each build, the pipeline calculates the cost of the ephemeral CI runner session:
+- Server hourly rate (from the Hetzner pricing API)
+- Primary IPv4 hourly rate (if applicable)
+- Hours billed (rounded up — Hetzner's minimum billing unit is 1 hour)
+
+The session cost appears in the **Build Summary** table in the GitHub Actions job summary.
+
+### Cumulative cost tracking
+
+When the CI runner is cleaned up, the pipeline:
+1. Calculates the session cost
+2. Reads the running total from the repository variable `HETZNER_CUMULATIVE_COST_EUR`
+3. Updates the total
+4. Writes a cost summary (session, cumulative, budget remaining) to the job summary
+
+The `HETZNER_CUMULATIVE_COST_EUR` variable is created automatically on the first run. To reset it (e.g., at the start of a new billing cycle), delete the variable or set it to `0`.
 
 ## Repository Structure
 
