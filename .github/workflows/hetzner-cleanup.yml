@@ -1,0 +1,322 @@
+# =============================================================================
+# Hetzner Failsafe Cleanup
+# =============================================================================
+#
+# Daily fail-safe that destroys ALL servers in the Hetzner Cloud project and
+# notifies the repo owner via a GitHub Issue if anything was destroyed.
+#
+# This workflow does NOT call or depend on build-iso.yml or release.yml.
+#
+# Secrets required:
+#   HCLOUD_TOKEN  — Hetzner Cloud API token (Read + Write)
+#
+# Notification mechanism:
+#   Creates a GitHub Issue when servers are destroyed. GitHub emails the repo
+#   owner for new issues.
+#
+# Security notes:
+#   - HCLOUD_TOKEN is only accessed via env: blocks, never inlined in scripts.
+#   - Server IDs from the API are validated as positive integers before use
+#     in DELETE URLs to prevent URL injection.
+#   - Issue body is written to a temp file to avoid shell injection.
+#   - All run: scripts use set -euo pipefail.
+# =============================================================================
+
+name: Hetzner Failsafe Cleanup
+
+on:
+  schedule:
+    - cron: '1 0 * * *'   # 00:01 UTC daily
+  workflow_dispatch: {}    # also allow manual runs
+
+permissions:
+  issues: write   # required to create notification issues
+
+jobs:
+  hetzner-failsafe-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # -------------------------------------------------------------------------
+      # Step 1 — List all Hetzner servers (with pagination)
+      # -------------------------------------------------------------------------
+      - name: List all Hetzner servers
+        id: list-servers
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::Fetching server list from Hetzner Cloud API"
+
+          # Fetch the first page and determine total page count
+          first_page=$(curl -sSf \
+            -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+            "https://api.hetzner.cloud/v1/servers?per_page=50")
+
+          total_pages=$(printf '%s' "$first_page" | jq '.meta.pagination.total_pages // 1')
+          echo "Total pages: ${total_pages}"
+
+          # Guard against absurdly large page counts (malformed response)
+          if [[ "$total_pages" -gt 20 ]]; then
+            echo "::error::API returned total_pages=${total_pages} which exceeds safety limit of 20. Aborting."
+            exit 1
+          fi
+
+          # Accumulate all server objects across all pages into one JSON array
+          all_servers=$(printf '%s' "$first_page" | jq '.servers')
+
+          if [[ "$total_pages" -gt 1 ]]; then
+            for page in $(seq 2 "$total_pages"); do
+              echo "Fetching page ${page}/${total_pages}..."
+              page_data=$(curl -sSf \
+                -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+                "https://api.hetzner.cloud/v1/servers?per_page=50&page=${page}")
+              page_servers=$(printf '%s' "$page_data" | jq '.servers')
+              all_servers=$(printf '%s\n%s' "$all_servers" "$page_servers" \
+                | jq -s 'add')
+            done
+          fi
+
+          total_servers=$(printf '%s' "$all_servers" | jq 'length')
+          echo "Total servers found: ${total_servers}"
+
+          if [[ "$total_servers" -eq 0 ]]; then
+            echo "No servers found."
+            echo "total_servers=0" >> "$GITHUB_OUTPUT"
+            echo "servers_json=[]" >> "$GITHUB_OUTPUT"
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          # Log each server found (no token data, only metadata)
+          echo ""
+          echo "Servers found:"
+          printf '%s' "$all_servers" | jq -r '.[] | "  \(.id)  \(.name)  \(.server_type.name)  \(.datacenter.location.name)  \(.status)  created=\(.created)"'
+
+          # Emit outputs — escape the JSON for GITHUB_OUTPUT (no newlines in value)
+          servers_json_oneline=$(printf '%s' "$all_servers" | jq -c '.')
+          echo "total_servers=${total_servers}" >> "$GITHUB_OUTPUT"
+          echo "servers_json=${servers_json_oneline}" >> "$GITHUB_OUTPUT"
+
+          echo "::endgroup::"
+
+      # -------------------------------------------------------------------------
+      # Step 2 — Delete all servers
+      # -------------------------------------------------------------------------
+      - name: Delete all servers
+        id: delete-servers
+        if: steps.list-servers.outputs.total_servers != '0'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          SERVERS_JSON: ${{ steps.list-servers.outputs.servers_json }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::Deleting all servers"
+
+          NOW=$(date -u +%s)
+          destroyed_count=0
+          destroyed_list=""
+          failed_list=""
+
+          # Iterate over each server object
+          while IFS= read -r server; do
+            # Extract and validate fields
+            raw_id=$(printf '%s' "$server" | jq -r '.id')
+            name=$(printf '%s' "$server"   | jq -r '.name')
+            stype=$(printf '%s' "$server"  | jq -r '.server_type.name')
+            loc=$(printf '%s' "$server"    | jq -r '.datacenter.location.name')
+            created=$(printf '%s' "$server" | jq -r '.created')
+
+            # Security: validate server ID is a positive integer before using in URL
+            if ! [[ "$raw_id" =~ ^[0-9]+$ ]]; then
+              echo "::warning::Skipping server with non-numeric ID: '${raw_id}' (name=${name})"
+              continue
+            fi
+            server_id="$raw_id"
+
+            # Calculate age
+            created_epoch=$(date -u -d "$created" +%s 2>/dev/null || echo "0")
+            if [[ "$created_epoch" -gt 0 ]]; then
+              age_seconds=$(( NOW - created_epoch ))
+              age_hours=$(( age_seconds / 3600 ))
+              age_minutes=$(( (age_seconds % 3600) / 60 ))
+              age_str="${age_hours}h ${age_minutes}m"
+            else
+              age_str="unknown age"
+            fi
+
+            echo "Deleting server: id=${server_id} name=${name} type=${stype} loc=${loc} age=${age_str}"
+
+            # Attempt deletion with up to 3 retries
+            success=false
+            for attempt in 1 2 3; do
+              http_code=$(curl -s -X DELETE \
+                -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+                "https://api.hetzner.cloud/v1/servers/${server_id}" \
+                -o /dev/null -w "%{http_code}")
+
+              if [[ "$http_code" =~ ^(200|204|404)$ ]]; then
+                echo "  [OK] HTTP ${http_code} -- deleted (attempt ${attempt})"
+                success=true
+                break
+              else
+                echo "  [WARN] HTTP ${http_code} -- attempt ${attempt} failed"
+                if [[ "$attempt" -lt 3 ]]; then
+                  sleep 5
+                fi
+              fi
+            done
+
+            if [[ "$success" == "true" ]]; then
+              destroyed_count=$(( destroyed_count + 1 ))
+              # Append to destroyed list (pipe-delimited for safe GITHUB_OUTPUT)
+              destroyed_list="${destroyed_list}${name} | ${stype} | ${loc} | ${age_str}\n"
+            else
+              echo "  [ERROR] Failed to delete server ${server_id} (${name}) after 3 attempts"
+              failed_list="${failed_list}${name} (id=${server_id})\n"
+            fi
+
+          done < <(printf '%s' "$SERVERS_JSON" | jq -c '.[]')
+
+          echo "::endgroup::"
+
+          echo "Destroyed: ${destroyed_count} server(s)"
+
+          # Write outputs — use base64 to safely encode multi-line values
+          echo "destroyed_count=${destroyed_count}" >> "$GITHUB_OUTPUT"
+
+          # Encode list outputs as base64 to avoid newline/special-char issues in GITHUB_OUTPUT
+          destroyed_list_b64=$(printf '%b' "${destroyed_list}" | base64 -w 0)
+          failed_list_b64=$(printf '%b' "${failed_list}" | base64 -w 0)
+          echo "destroyed_list_b64=${destroyed_list_b64}" >> "$GITHUB_OUTPUT"
+          echo "failed_list_b64=${failed_list_b64}" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------------
+      # Step 3 — Create GitHub Issue notification (only if servers were destroyed)
+      # -------------------------------------------------------------------------
+      - name: Create GitHub Issue notification
+        id: create-issue
+        if: >-
+          steps.delete-servers.conclusion == 'success' &&
+          (steps.delete-servers.outputs.destroyed_count != '0' ||
+           steps.delete-servers.outputs.failed_list_b64 != '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESTROYED_COUNT: ${{ steps.delete-servers.outputs.destroyed_count }}
+          DESTROYED_LIST_B64: ${{ steps.delete-servers.outputs.destroyed_list_b64 }}
+          FAILED_LIST_B64: ${{ steps.delete-servers.outputs.failed_list_b64 }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_DATE: ""   # filled below
+        run: |
+          set -euo pipefail
+
+          RUN_DATE=$(date -u '+%Y-%m-%d')
+          ISSUE_TITLE="Hetzner failsafe cleanup destroyed ${DESTROYED_COUNT} server(s) -- ${RUN_DATE}"
+
+          # Decode lists from base64
+          DESTROYED_LIST=$(printf '%s' "$DESTROYED_LIST_B64" | base64 -d)
+          FAILED_LIST=$(printf '%s' "$FAILED_LIST_B64" | base64 -d)
+
+          # Build the destroyed servers table rows
+          TABLE_ROWS=""
+          while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+              TABLE_ROWS="${TABLE_ROWS}| ${line} |\n"
+            fi
+          done <<< "$DESTROYED_LIST"
+
+          # Build optional failures section
+          if [[ -n "$FAILED_LIST" ]]; then
+            FAILURES_SECTION=$(printf '## Failed Deletions\n\nThe servers listed below could NOT be deleted after 3 attempts and may still be running:\n\n```\n%s\n```\n\nCheck the Hetzner Cloud console and delete these manually.\n' "$FAILED_LIST")
+          else
+            FAILURES_SECTION=""
+          fi
+
+          # Write the issue body to a temp file using printf (no heredocs -- avoids YAML | issues)
+          printf '## Summary\n\n' > /tmp/issue-body.md
+          printf 'The daily Hetzner failsafe cleanup workflow found %s server(s) still running and destroyed them.\n\n' "$DESTROYED_COUNT" >> /tmp/issue-body.md
+          printf '## Destroyed Servers\n\n' >> /tmp/issue-body.md
+          printf '| Name | Type | Location | Age at deletion |\n' >> /tmp/issue-body.md
+          printf '|------|------|----------|-----------------|\n' >> /tmp/issue-body.md
+          printf '%b' "$TABLE_ROWS" >> /tmp/issue-body.md
+          printf '\n' >> /tmp/issue-body.md
+          if [[ -n "$FAILURES_SECTION" ]]; then
+            printf '%s\n\n' "$FAILURES_SECTION" >> /tmp/issue-body.md
+          fi
+          printf '## Workflow Run\n\n' >> /tmp/issue-body.md
+          printf '[View the full workflow run logs](%s)\n\n' "$RUN_URL" >> /tmp/issue-body.md
+          printf '%s\n\n' '---' >> /tmp/issue-body.md
+          printf '_Created by the Hetzner failsafe cleanup workflow._\n' >> /tmp/issue-body.md
+
+          echo "::group::Issue body preview"
+          cat /tmp/issue-body.md
+          echo "::endgroup::"
+
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "$ISSUE_TITLE" \
+            --body-file /tmp/issue-body.md \
+            --label "bug" || \
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "$ISSUE_TITLE" \
+            --body-file /tmp/issue-body.md
+
+      # -------------------------------------------------------------------------
+      # Step 4 — Write job summary (always runs)
+      # -------------------------------------------------------------------------
+      - name: Write job summary
+        if: always()
+        env:
+          TOTAL_SERVERS: ${{ steps.list-servers.outputs.total_servers }}
+          DESTROYED_COUNT: ${{ steps.delete-servers.outputs.destroyed_count }}
+          DESTROYED_LIST_B64: ${{ steps.delete-servers.outputs.destroyed_list_b64 }}
+          FAILED_LIST_B64: ${{ steps.delete-servers.outputs.failed_list_b64 }}
+        run: |
+          set -euo pipefail
+
+          RUN_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          TOTAL="${TOTAL_SERVERS:-0}"
+          DESTROYED="${DESTROYED_COUNT:-0}"
+
+          printf '## Hetzner Failsafe Cleanup\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Property | Value |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|----------|-------|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Run date (UTC)** | %s |\n' "$RUN_DATE" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Servers found** | %s |\n' "$TOTAL" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Servers destroyed** | %s |\n' "$DESTROYED" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$TOTAL" -eq 0 ]]; then
+            printf '\nNo servers found. Project is clean.\n' >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$DESTROYED" -gt 0 ]]; then
+            printf '\nServers were found and destroyed. A GitHub Issue has been created.\n\n' >> "$GITHUB_STEP_SUMMARY"
+
+            # Decode and render destroyed list if present
+            if [[ -n "${DESTROYED_LIST_B64:-}" ]]; then
+              DESTROYED_LIST=$(printf '%s' "$DESTROYED_LIST_B64" | base64 -d)
+              printf '### Destroyed Servers\n\n' >> "$GITHUB_STEP_SUMMARY"
+              printf '| Name | Type | Location | Age |\n' >> "$GITHUB_STEP_SUMMARY"
+              printf '|------|------|----------|-----|\n' >> "$GITHUB_STEP_SUMMARY"
+              while IFS= read -r line; do
+                if [[ -n "$line" ]]; then
+                  printf '| %s |\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+                fi
+              done <<< "$DESTROYED_LIST"
+              printf '\n' >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+            # Decode and render failures if present
+            if [[ -n "${FAILED_LIST_B64:-}" ]]; then
+              FAILED_LIST=$(printf '%s' "$FAILED_LIST_B64" | base64 -d)
+              if [[ -n "$FAILED_LIST" ]]; then
+                printf '### Failed Deletions\n\n' >> "$GITHUB_STEP_SUMMARY"
+                printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+                printf '%s\n' "$FAILED_LIST" >> "$GITHUB_STEP_SUMMARY"
+                printf '```\n\n' >> "$GITHUB_STEP_SUMMARY"
+                printf 'These servers may still be running. Check the Hetzner Cloud console.\n\n' >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          fi
