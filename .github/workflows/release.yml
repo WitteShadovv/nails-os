@@ -108,8 +108,8 @@ jobs:
           mkdir -p dist
           # Outputs are base64-encoded to safely transport multiline content
           # through GitHub Actions workflow outputs without EOF delimiter collisions
-          printf '%s' "$CHECKSUMS_B64" | base64 -d > dist/checksums.txt
-          printf '%s' "$BUILD_METADATA_B64" | base64 -d > dist/build-metadata.json
+          echo "$CHECKSUMS_B64" | base64 --decode > dist/checksums.txt
+          echo "$BUILD_METADATA_B64" | base64 --decode > dist/build-metadata.json
 
       - name: Validate metadata files
         run: |
@@ -445,7 +445,7 @@ jobs:
           printf '| **Reproducible** | %s |\n' "${REPRODUCIBLE}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **Attestation** | %s |\n\n' "${ATTEST_STATUS}" >> "$GITHUB_STEP_SUMMARY"
           printf '### Assets\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '- ISO hosted on Cloudflare R2\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '- `checksums.txt`\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '- `build-metadata.json`\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- ISO hosted on Cloudflare R2\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- `checksums.txt`\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- `build-metadata.json`\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf '### Release URL\n%s\n' "${RELEASE_URL}" >> "$GITHUB_STEP_SUMMARY"
