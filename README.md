@@ -78,7 +78,7 @@ No software can substitute for sound operational security practices.
 Download the latest ISO from the [Releases](https://github.com/WitteShadovv/nails-os/releases) page. Each release includes:
 
 - **ISO download link** (hosted on Cloudflare R2)
-- `SHA256SUMS` — checksum file for integrity verification
+- `checksums.txt` — checksum file for integrity verification
 - `build-metadata.json` — full build provenance (commit, Nix version, reproducibility status)
 - Source code archives
 
@@ -89,8 +89,8 @@ Download the latest ISO from the [Releases](https://github.com/WitteShadovv/nail
 After downloading, verify integrity:
 
 ```bash
-# Download SHA256SUMS from the same release, then:
-sha256sum -c SHA256SUMS
+# Download checksums.txt from the same release, then:
+sha256sum -c checksums.txt
 ```
 
 See [ISO Verification](#iso-verification) for build provenance verification.
@@ -115,11 +115,11 @@ If you downloaded a release ISO, verify its integrity before writing to USB:
 
 ```bash
 # Verify ISO checksum
-sha256sum -c SHA256SUMS
+sha256sum -c checksums.txt
 
 # Verify build provenance attestation (requires gh CLI)
-# The attestation covers SHA256SUMS, which contains the ISO checksum.
-gh attestation verify SHA256SUMS --repo WitteShadovv/nails-os
+# The attestation covers checksums.txt, which contains the ISO checksum.
+gh attestation verify checksums.txt --repo WitteShadovv/nails-os
 ```
 
 ## Installation
@@ -174,7 +174,7 @@ The project uses an automated CI/CD pipeline with ephemeral Hetzner Cloud server
 
 **Build pipeline** (`build-iso.yml`): Triggered on pushes to `main`, pull requests, manual dispatch, or as a reusable workflow. Provisions an ephemeral build server on Hetzner Cloud, builds the ISO, runs L1 and L2 reproducibility checks, then unconditionally destroys the server.
 
-**Release pipeline** (`release.yml`): Triggered on `v*` tag pushes or manual dispatch. Calls the build pipeline, then creates a GitHub Release with the ISO, SHA256SUMS, and build metadata as release assets. Generates Sigstore build provenance attestation (verifiable with `gh attestation verify`).
+**Release pipeline** (`release.yml`): Triggered on `v*` tag pushes or manual dispatch. Calls the build pipeline, then creates a GitHub Release with the ISO, checksums.txt, and build metadata as release assets. Generates Sigstore build provenance attestation (verifiable with `gh attestation verify`).
 
 **Failsafe cleanup** (`hetzner-cleanup.yml`): Runs daily at 00:01 UTC. Destroys any servers remaining in the Hetzner project to prevent orphaned servers from accruing charges. Creates a GitHub Issue notification if any servers were cleaned up.
 
