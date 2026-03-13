@@ -56,6 +56,14 @@ jobs:
   build:
     name: Build ISO
     uses: ./.github/workflows/build-iso.yml
+    # Grant the permissions that build-iso.yml's jobs declare:
+    #   - contents: read  (top-level default in build-iso.yml)
+    #   - contents: write (publish-latest job in build-iso.yml)
+    # The caller must grant the union of all permissions the callee may use.
+    # publish-latest only runs on push-to-main (not on workflow_call), but
+    # GitHub validates declared permissions at parse time regardless of `if`.
+    permissions:
+      contents: write
     with:
       verify_reproducibility: true
     secrets:
@@ -103,7 +111,7 @@ jobs:
           echo ""
 
           # Ensure required metadata files are present (ISO is on R2, not in the artifact)
-          for file in SHA256SUMS build-metadata.json; do
+          for file in checksums.txt build-metadata.json; do
             if [ ! -f "dist/${file}" ]; then
               echo "::error::Missing required artifact: ${file}"
               exit 1
@@ -112,8 +120,8 @@ jobs:
 
           echo "All required artifacts present."
           echo ""
-          echo "--- SHA256SUMS ---"
-          cat dist/SHA256SUMS
+          echo "--- checksums.txt ---"
+          cat dist/checksums.txt
           echo ""
           echo "--- build-metadata.json ---"
           cat dist/build-metadata.json
@@ -186,12 +194,12 @@ jobs:
           echo "nixpkgs_rev=${NIXPKGS_REV}" >> "$GITHUB_OUTPUT"
           echo "reproducible=${REPRODUCIBLE}" >> "$GITHUB_OUTPUT"
 
-          # --- Read SHA256SUMS for inclusion in release notes ---
-          SHA256SUMS_CONTENT=$(cat dist/SHA256SUMS)
+          # --- Read checksums.txt for inclusion in release notes ---
+          CHECKSUMS_CONTENT=$(cat dist/checksums.txt)
           # Use heredoc delimiter for multi-line output
           {
             echo "sha256sums<<EOFSHA"
-            echo "${SHA256SUMS_CONTENT}"
+            echo "${CHECKSUMS_CONTENT}"
             echo "EOFSHA"
           } >> "$GITHUB_OUTPUT"
 
@@ -218,7 +226,7 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 5. Create build provenance attestation (public repos only)
-      #    Attests the SHA256SUMS file, which is cryptographically tied to the
+      #    Attests the checksums.txt file, which is cryptographically tied to the
       #    ISO (the ISO's checksum is inside it). The ISO itself is on R2 and
       #    is not available in this runner's workspace.
       # -----------------------------------------------------------------------
@@ -226,7 +234,7 @@ jobs:
         if: steps.repo.outputs.is_public == 'true'
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/SHA256SUMS
+          subject-path: dist/checksums.txt
 
       # -----------------------------------------------------------------------
       # 6. Generate release notes body
@@ -240,7 +248,7 @@ jobs:
           NIX_VERSION: ${{ steps.meta.outputs.nix_version }}
           NIXPKGS_REV: ${{ steps.meta.outputs.nixpkgs_rev }}
           REPRO_STATUS: ${{ steps.meta.outputs.reproducible }}
-          SHA256SUMS: ${{ steps.meta.outputs.sha256sums }}
+          CHECKSUMS: ${{ steps.meta.outputs.sha256sums }}
           IS_PUBLIC: ${{ steps.repo.outputs.is_public }}
           REPOSITORY: ${{ github.repository }}
           R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
@@ -257,7 +265,7 @@ jobs:
           nix_version = os.environ["NIX_VERSION"]
           nixpkgs_rev = os.environ["NIXPKGS_REV"]
           repro_status = os.environ["REPRO_STATUS"]
-          sha256sums = os.environ["SHA256SUMS"]
+          checksums = os.environ["CHECKSUMS"]
           is_public = os.environ["IS_PUBLIC"]
           repository = os.environ["REPOSITORY"]
           r2_public_url = os.environ.get("R2_PUBLIC_URL", "")
@@ -281,9 +289,10 @@ jobs:
 
           Verify the build attestation (requires [GitHub CLI](https://cli.github.com/)):
           ```bash
-          # The attestation covers SHA256SUMS (which contains the ISO checksum).
-          # Download SHA256SUMS from this release, then:
-          gh attestation verify SHA256SUMS --repo {repository}
+          # The attestation covers checksums.txt (which contains the ISO checksum).
+          # Download checksums.txt from this release, then:
+          gh attestation verify checksums.txt --repo {repository}
+          sha256sum -c checksums.txt
           ```"""
           else:
               attestation = """### Attestation
@@ -303,12 +312,12 @@ jobs:
 
           Verify the ISO integrity:
           ```bash
-          sha256sum -c SHA256SUMS
+          sha256sum -c checksums.txt
           ```
 
           **SHA256 Checksums:**
           ```
-          {sha256sums}
+          {checksums}
           ```
 
           ### Build Provenance
@@ -386,7 +395,7 @@ jobs:
 
           # Attach metadata (ISO is hosted on R2, not on GitHub Releases)
           GH_ARGS+=(
-            "dist/SHA256SUMS"
+            "dist/checksums.txt"
             "dist/build-metadata.json"
           )
 
@@ -425,6 +434,6 @@ jobs:
           printf '| **Attestation** | %s |\n\n' "${ATTEST_STATUS}" >> "$GITHUB_STEP_SUMMARY"
           printf '### Assets\n' >> "$GITHUB_STEP_SUMMARY"
           printf '- ISO hosted on Cloudflare R2\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '- `SHA256SUMS`\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '- `checksums.txt`\n' >> "$GITHUB_STEP_SUMMARY"
           printf '- `build-metadata.json`\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf '### Release URL\n%s\n' "${RELEASE_URL}" >> "$GITHUB_STEP_SUMMARY"
