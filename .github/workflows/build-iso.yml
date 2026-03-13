@@ -1144,11 +1144,12 @@ jobs:
           printf '| **Session cost** | ~€%s (%sh) |\n' "${{ steps.session-cost.outputs.session_cost_eur }}" "${{ steps.session-cost.outputs.session_hours }}" >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
-  # Job 2b: Publish rolling "latest" release (push to main only)
+  # Job 2b: Publish rolling pre-release (push to main only)
   # ===========================================================================
-  # On every successful push-to-main build, update the "latest" pre-release
-  # with the freshly built ISO. This ensures every build is usable — the ISO
-  # never goes to waste. Release assets on public repos are free and unmetered.
+  # On every successful push-to-main build, create a new pre-release tagged
+  # latest-{short_sha} with checksums and build metadata. The ISO itself is
+  # hosted on Cloudflare R2 (latest/). Releases are never deleted — each
+  # build produces a permanent, immutable record.
   #
   # This does NOT run on:
   #   - Pull requests (no release for untested code)
@@ -1194,8 +1195,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="latest"
-          TITLE="NAILS OS (latest build)"
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          TAG="latest-${SHORT_SHA}"
+          TITLE="NAILS OS (${SHORT_SHA})"
 
           echo "::group::Preparing release metadata"
           # Verify metadata files are present (artifact contains SHA256SUMS + build-metadata.json)
@@ -1217,11 +1220,12 @@ jobs:
           ls -lh dist/
           echo "::endgroup::"
 
-          echo "::group::Managing latest release"
-          # Delete existing latest release if it exists (idempotent)
+          # Skip if this tag already exists (idempotent re-runs)
           if gh release view "$TAG" --repo "${{ github.repository }}" &>/dev/null; then
-            echo "Deleting existing '$TAG' release..."
-            gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+            echo "::notice::Release ${TAG} already exists — skipping (idempotent)."
+            RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
+            echo "::notice::Existing release: $RELEASE_URL"
+            exit 0
           fi
 
           # Build download link
@@ -1231,8 +1235,9 @@ jobs:
             DOWNLOAD_LINK="> R2 public URL not configured — ISO was uploaded to R2 but no public link is available."
           fi
 
-          # Create the release (metadata only — ISO is hosted on R2)
-          NOTES="Rolling build from \`main\` branch.
+          # Write release notes to file to avoid shell quoting issues
+          cat > /tmp/release-notes.md << EOF
+          Rolling build from \`main\` branch.
 
           ${DOWNLOAD_LINK}
 
@@ -1241,29 +1246,31 @@ jobs:
           | **ISO filename** | \`${ISO_NAME}\` |
           | **ISO SHA256** | \`${ISO_SHA256}\` |
           | **ISO size** | ${ISO_SIZE_MB} MB |
-          | **Commit** | \`${{ github.sha }}\` |
+          | **Commit** | [\`${SHORT_SHA}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
           | **Ref** | \`${{ github.ref_name }}\` |
           | **Built** | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
 
-          > This is an automated pre-release updated on every push to \`main\`.
-          > For stable releases, see the versioned tags (\`v*\`).
+          ### Verify integrity
 
-          **Verify integrity:**
+          After downloading the ISO and \`SHA256SUMS\` from this release:
           \`\`\`bash
-          echo '$(cat dist/SHA256SUMS)' | sha256sum -c
-          \`\`\`"
+          sha256sum -c SHA256SUMS
+          \`\`\`
+
+          > This is an automated pre-release from \`main\`.
+          > For stable releases, see the versioned tags (\`v*\`).
+          EOF
 
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "$TITLE" \
-            --notes "$NOTES" \
+            --notes-file /tmp/release-notes.md \
             --target "${{ github.sha }}" \
             --prerelease \
             dist/SHA256SUMS dist/build-metadata.json
 
           RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
-          echo "::notice::Published latest release: $RELEASE_URL"
-          echo "::endgroup::"
+          echo "::notice::Published release: $RELEASE_URL"
 
   # ===========================================================================
   # Job 3: Destroy the Hetzner Cloud server

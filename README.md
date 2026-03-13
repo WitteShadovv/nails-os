@@ -15,6 +15,7 @@ Designed for journalists, activists, researchers, and anyone who needs to leave 
 - [Key Features](#key-features)
 - [Threat Model](#threat-model)
 - [System Requirements](#system-requirements)
+- [Download](#download)
 - [Quick Start](#quick-start)
 - [ISO Verification](#iso-verification)
 - [Installation](#installation)
@@ -72,6 +73,28 @@ No software can substitute for sound operational security practices.
 | USB | 4 GB minimum for the installer ISO |
 | Disk | Any size; fully encrypted (EFI partition + LUKS2 root) |
 
+## Download
+
+Download the latest ISO from the [Releases](https://github.com/WitteShadovv/nails-os/releases) page. Each release includes:
+
+- **ISO download link** (hosted on Cloudflare R2)
+- `SHA256SUMS` — checksum file for integrity verification
+- `build-metadata.json` — full build provenance (commit, Nix version, reproducibility status)
+- Source code archives
+
+> The ISO is ~4 GB. It is hosted externally on Cloudflare R2 because GitHub Releases has a 2 GB per-asset limit. The download link is in the release notes.
+
+**Stable releases** use versioned tags (`v*`). **Rolling builds** from `main` are tagged `latest-{commit}` and marked as pre-releases.
+
+After downloading, verify integrity:
+
+```bash
+# Download SHA256SUMS from the same release, then:
+sha256sum -c SHA256SUMS
+```
+
+See [ISO Verification](#iso-verification) for build provenance verification.
+
 ## Quick Start
 
 Requires [Nix with flakes enabled](https://nixos.org/download) (enable flakes in `~/.config/nix/nix.conf`).
@@ -91,11 +114,12 @@ sudo dd if=result/iso/<filename>.iso of=/dev/sdX bs=4M status=progress oflag=syn
 If you downloaded a release ISO, verify its integrity before writing to USB:
 
 ```bash
-# Verify checksum
+# Verify ISO checksum
 sha256sum -c SHA256SUMS
 
-# Verify build provenance (requires gh CLI)
-gh attestation verify <iso-file> --repo WitteShadovv/nails-os
+# Verify build provenance attestation (requires gh CLI)
+# The attestation covers SHA256SUMS, which contains the ISO checksum.
+gh attestation verify SHA256SUMS --repo WitteShadovv/nails-os
 ```
 
 ## Installation

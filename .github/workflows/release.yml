@@ -281,7 +281,9 @@ jobs:
 
           Verify the build attestation (requires [GitHub CLI](https://cli.github.com/)):
           ```bash
-          gh attestation verify <ISO_FILE> --repo {repository}
+          # The attestation covers SHA256SUMS (which contains the ISO checksum).
+          # Download SHA256SUMS from this release, then:
+          gh attestation verify SHA256SUMS --repo {repository}
           ```"""
           else:
               attestation = """### Attestation
@@ -339,26 +341,29 @@ jobs:
           PYEOF
 
       # -----------------------------------------------------------------------
-      # 7. Delete existing release if re-running (idempotent)
+      # 7. Check for existing release (idempotent — never delete)
       # -----------------------------------------------------------------------
-      - name: Delete existing release (if re-running)
+      - name: Check for existing release
+        id: existing
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-
-          # Attempt to delete an existing release for this tag (ignore errors)
           if gh release view "${TAG}" &>/dev/null; then
-            echo "::warning::Existing release for ${TAG} found — deleting for re-creation."
-            gh release delete "${TAG}" --yes --cleanup-tag
+            echo "::warning::Release ${TAG} already exists — skipping creation."
+            RELEASE_URL=$(gh release view "${TAG}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
+            echo "::notice::Existing release: ${RELEASE_URL}"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No existing release for ${TAG} — proceeding."
+            echo "No existing release for ${TAG} — will create."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
       # -----------------------------------------------------------------------
       # 8. Create the GitHub Release
       # -----------------------------------------------------------------------
       - name: Create GitHub Release
+        if: steps.existing.outputs.exists != 'true'
         id: create_release
         env:
           GH_TOKEN: ${{ github.token }}
