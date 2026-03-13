@@ -90,7 +90,7 @@ jobs:
       # -----------------------------------------------------------------------
       # 1. Checkout — required for `gh` CLI repository context
       # -----------------------------------------------------------------------
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -100,7 +100,7 @@ jobs:
       # The files are passed directly through job outputs instead of GitHub
       # artifact storage, which was unreliable across workflow boundaries.
       # -----------------------------------------------------------------------
-      - name: Reconstruct metadata from build outputs
+      - name: Decode build metadata
         env:
           CHECKSUMS_B64: ${{ needs.build.outputs.checksums_content }}
           BUILD_METADATA_B64: ${{ needs.build.outputs.build_metadata_content }}
@@ -111,7 +111,7 @@ jobs:
           printf '%s' "$CHECKSUMS_B64" | base64 -d > dist/checksums.txt
           printf '%s' "$BUILD_METADATA_B64" | base64 -d > dist/build-metadata.json
 
-      - name: Verify reconstructed artifacts
+      - name: Validate metadata files
         run: |
           echo "--- Reconstructed artifacts ---"
           ls -la dist/
@@ -243,7 +243,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Create artifact attestation
         if: steps.repo.outputs.is_public == 'true'
-        uses: actions/attest-build-provenance@210c1913531a0a5f12dcd9e8a0a3b6d2af02c03e  # v2.4.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
         with:
           subject-path: dist/checksums.txt
 
@@ -382,7 +382,7 @@ jobs:
       # -----------------------------------------------------------------------
       # 8. Create the GitHub Release
       # -----------------------------------------------------------------------
-      - name: Create GitHub Release
+      - name: Create release
         if: steps.existing.outputs.exists != 'true'
         id: create_release
         env:
@@ -418,7 +418,7 @@ jobs:
       # -----------------------------------------------------------------------
       # 9. Write job summary with release details
       # -----------------------------------------------------------------------
-      - name: Write job summary
+      - name: Summarize release
         if: always()
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
