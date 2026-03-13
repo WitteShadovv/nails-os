@@ -1019,19 +1019,21 @@ jobs:
           fi
 
           HOURLY_RATE=$(echo "$PRICING" | jq -r --arg type "$SERVER_TYPE" --arg loc "$LOCATION" '
-            .pricing.server_types[] | select(.name == $type) |
+            (.pricing.server_types[] | select(.name == $type) |
             .prices[] | select(.location == $loc) |
-            .price_hourly.gross' 2>/dev/null || echo "0")
-          HOURLY_RATE="${HOURLY_RATE:-0}"
+            .price_hourly.gross) // "0"' 2>/dev/null || echo "0")
+          # Guard: jq -r emits the literal string "null" when a field is JSON null.
+          # ${:-0} only catches empty/unset — it does NOT sanitise "null". Use regex.
+          [[ "$HOURLY_RATE" =~ ^[0-9]+(\.[0-9]+)?$ ]] || HOURLY_RATE="0"
 
           IPV4_HOURLY="0"
           if [ -n "$HAS_IPV4" ]; then
             IPV4_HOURLY=$(echo "$PRICING" | jq -r --arg loc "$LOCATION" '
-              .pricing.primary_ips[] | select(.type == "ipv4") |
+              (.pricing.primary_ips[] | select(.type == "ipv4") |
               .prices[] | select(.location == $loc) |
-              .price_hourly.gross' 2>/dev/null || echo "0")
+              .price_hourly.gross) // "0"' 2>/dev/null || echo "0")
+            [[ "$IPV4_HOURLY" =~ ^[0-9]+(\.[0-9]+)?$ ]] || IPV4_HOURLY="0"
           fi
-          IPV4_HOURLY="${IPV4_HOURLY:-0}"
 
           SESSION_COST=$(awk "BEGIN {printf \"%.10f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
           SESSION_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
@@ -1225,19 +1227,21 @@ jobs:
           fi
 
           HOURLY_RATE=$(echo "$PRICING" | jq -r --arg type "$SERVER_TYPE" --arg loc "$LOCATION" '
-            .pricing.server_types[] | select(.name == $type) |
+            (.pricing.server_types[] | select(.name == $type) |
             .prices[] | select(.location == $loc) |
-            .price_hourly.gross' 2>/dev/null || echo "0")
-          HOURLY_RATE="${HOURLY_RATE:-0}"
+            .price_hourly.gross) // "0"' 2>/dev/null || echo "0")
+          # Guard: jq -r emits the literal string "null" when a field is JSON null.
+          # ${:-0} only catches empty/unset — it does NOT sanitise "null". Use regex.
+          [[ "$HOURLY_RATE" =~ ^[0-9]+(\.[0-9]+)?$ ]] || HOURLY_RATE="0"
 
           IPV4_HOURLY="0"
           if [ -n "$HAS_IPV4" ]; then
             IPV4_HOURLY=$(echo "$PRICING" | jq -r --arg loc "$LOCATION" '
-              .pricing.primary_ips[] | select(.type == "ipv4") |
+              (.pricing.primary_ips[] | select(.type == "ipv4") |
               .prices[] | select(.location == $loc) |
-              .price_hourly.gross' 2>/dev/null || echo "0")
+              .price_hourly.gross) // "0"' 2>/dev/null || echo "0")
+            [[ "$IPV4_HOURLY" =~ ^[0-9]+(\.[0-9]+)?$ ]] || IPV4_HOURLY="0"
           fi
-          IPV4_HOURLY="${IPV4_HOURLY:-0}"
 
           SESSION_COST=$(awk "BEGIN {printf \"%.10f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
           SESSION_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
