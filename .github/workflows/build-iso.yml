@@ -9,7 +9,11 @@
 #                       GitHub Actions runner with a 9-combo fallback strategy
 #                       (3 server types × 3 locations).
 #   2. build-and-verify — Builds the ISO, verifies reproducibility (L1 same-store
-#                         check + L2 full rebuild comparison), uploads artifacts.
+#                         check + L2 full rebuild comparison), uploads artifacts,
+#                         and (on push to main) publishes the rolling pre-release.
+#                         The publish logic runs as conditional steps at the end of
+#                         this job — not as a separate job — so the server is never
+#                         kept alive waiting for a downstream publish job to finish.
 #   3. delete-runner  — Tears down the Hetzner server. Runs unconditionally to
 #                       prevent orphaned (billable) infrastructure.
 #
@@ -73,6 +77,12 @@ on:
       r2_uploaded:
         description: "Whether the ISO was successfully uploaded to R2"
         value: ${{ jobs.build-and-verify.outputs.r2_uploaded }}
+      checksums_content:
+        description: "Base64-encoded content of dist/checksums.txt"
+        value: ${{ jobs.build-and-verify.outputs.checksums_content }}
+      build_metadata_content:
+        description: "Base64-encoded content of dist/build-metadata.json"
+        value: ${{ jobs.build-and-verify.outputs.build_metadata_content }}
 
 permissions:
   contents: read
@@ -95,7 +105,7 @@ jobs:
   # ===========================================================================
   create-runner:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     outputs:
       label: ${{ steps.determine-combo.outputs.label }}
       server_id: ${{ steps.determine-combo.outputs.server_id }}
@@ -192,7 +202,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -227,7 +237,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -262,7 +272,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -300,7 +310,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -339,7 +349,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -379,7 +389,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -420,7 +430,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -462,7 +472,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -505,7 +515,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ secrets.HCLOUD_SSH_KEY_ID || 'null' }}
+          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
           pre_runner_script: |
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
@@ -616,6 +626,7 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: |
+          [[ -n "${HCLOUD_TOKEN:-}" ]] && echo "::add-mask::$HCLOUD_TOKEN"
           echo "::group::Cleaning up orphaned servers"
 
           # The successful combo's server_id (keep this one alive)
@@ -668,9 +679,13 @@ jobs:
     needs: create-runner
     runs-on: ${{ needs.create-runner.outputs.label }}
     timeout-minutes: 180
+    permissions:
+      contents: write
     outputs:
       r2_iso_name: ${{ steps.r2-upload.outputs.iso_name }}
       r2_uploaded: ${{ steps.r2-upload.outputs.r2_uploaded }}
+      checksums_content: ${{ steps.capture-metadata.outputs.checksums_content_b64 }}
+      build_metadata_content: ${{ steps.capture-metadata.outputs.build_metadata_content_b64 }}
     steps:
       # -----------------------------------------------------------------------
       # Install host dependencies
@@ -688,7 +703,7 @@ jobs:
       # Checkout
       # -----------------------------------------------------------------------
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -764,7 +779,6 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "Verify same-store reproducibility (L1)"
         id: l1-check
-        continue-on-error: true
         run: |
           echo "::group::L1 same-store reproducibility check"
 
@@ -800,13 +814,20 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "Verify rebuild reproducibility (L2)"
         id: l2-check
-        continue-on-error: true
         if: >-
           (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           (github.event_name == 'workflow_dispatch' && inputs.verify_reproducibility == true) ||
           (github.event_name == 'workflow_call' && inputs.verify_reproducibility == true)
         run: |
           echo "::group::L2 full rebuild reproducibility verification"
+          # Gate: ensure there is enough disk space for a full rebuild
+          AVAILABLE_GB=$(df --output=avail / | tail -1 | awk '{print int($1/1048576)}')
+          echo "Available disk space: ${AVAILABLE_GB} GB"
+          if [[ "$AVAILABLE_GB" -lt 30 ]]; then
+            echo "::error::Insufficient disk space for L2 rebuild: ${AVAILABLE_GB} GB available, need at least 30 GB"
+            exit 1
+          fi
+
           CANONICAL_HASH="${{ steps.build-iso.outputs.iso_sha256 }}"
 
           # Preserve the canonical ISO
@@ -873,6 +894,31 @@ jobs:
           echo "::endgroup::"
 
       # -----------------------------------------------------------------------
+      # Fail the build if reproducibility checks failed
+      # -----------------------------------------------------------------------
+      - name: Enforce reproducibility gate
+        run: |
+          L1="${{ steps.l1-check.outputs.l1_result }}"
+          L2="${{ steps.l2-check.outputs.reproducible }}"
+          failed=false
+
+          if [[ "$L1" == "fail" ]]; then
+            echo "::error::L1 same-store reproducibility check failed. Refusing to release a non-reproducible build."
+            failed=true
+          fi
+
+          if [[ "$L2" == "false" ]]; then
+            echo "::error::L2 full-rebuild reproducibility check failed. Refusing to release a non-reproducible build."
+            failed=true
+          fi
+
+          if [[ "$failed" == "true" ]]; then
+            exit 1
+          fi
+
+          echo "✅ Reproducibility gate passed"
+
+      # -----------------------------------------------------------------------
       # Collect artifacts into dist/
       # -----------------------------------------------------------------------
       - name: Collect artifacts
@@ -916,61 +962,105 @@ jobs:
             L2_RESULT="skipped"
           fi
 
-          # Ensure numeric fields have fallback values to prevent invalid JSON
+          # Ensure numeric fields have fallback values
           BUILD_DURATION="${{ steps.build-iso.outputs.build_duration }}"
           BUILD_DURATION="${BUILD_DURATION:-0}"
           ISO_SIZE="${{ steps.build-iso.outputs.iso_size }}"
           ISO_SIZE="${ISO_SIZE:-0}"
 
-          cat > dist/build-metadata.json << METADATA
-          {
-            "project": "NAILS OS",
-            "version": "$(git describe --tags --always --dirty 2>/dev/null || echo 'untagged')",
-            "git": {
-              "commit": "${{ github.sha }}",
-              "ref": "${{ github.ref }}",
-              "ref_name": "${{ github.ref_name }}",
-              "repository": "${{ github.repository }}"
-            },
-            "build": {
-              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-              "duration_seconds": ${BUILD_DURATION},
-              "server_type": "${{ needs.create-runner.outputs.server_type }}",
-              "location": "${{ needs.create-runner.outputs.location }}",
-              "nix_version": "$(nix --version 2>/dev/null | head -1)",
-              "runner_label": "${{ needs.create-runner.outputs.label }}"
-            },
-            "iso": {
-              "filename": "${{ steps.build-iso.outputs.iso_filename }}",
-              "sha256": "${{ steps.build-iso.outputs.iso_sha256 }}",
-              "size_bytes": ${ISO_SIZE}
-            },
-            "reproducibility": {
-              "l1_same_store": "${L1_RESULT:-unknown}",
-              "l2_full_rebuild": "${L2_RESULT}"
-            },
-            "workflow": {
-              "run_id": "${{ github.run_id }}",
-              "run_number": "${{ github.run_number }}",
-              "run_attempt": "${{ github.run_attempt }}",
-              "event_name": "${{ github.event_name }}",
-              "triggered_by": "${{ github.actor }}"
-            },
-            "nixpkgs": {
-              "revision": "${NIXPKGS_REV}"
-            }
-          }
-          METADATA
+          BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          NIX_VERSION="$(nix --version 2>/dev/null | head -1)"
+          GIT_VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo 'untagged')"
+
+          mkdir -p dist
+
+          # Use jq -n to safely construct JSON — all string values are properly escaped
+          jq -n \
+            --arg project "NAILS OS" \
+            --arg version "$GIT_VERSION" \
+            --arg commit "${{ github.sha }}" \
+            --arg ref "${{ github.ref }}" \
+            --arg ref_name "${{ github.ref_name }}" \
+            --arg repository "${{ github.repository }}" \
+            --arg timestamp "$BUILD_TIMESTAMP" \
+            --argjson duration "${BUILD_DURATION}" \
+            --arg server_type "${{ needs.create-runner.outputs.server_type }}" \
+            --arg location "${{ needs.create-runner.outputs.location }}" \
+            --arg nix_version "$NIX_VERSION" \
+            --arg runner_label "${{ needs.create-runner.outputs.label }}" \
+            --arg iso_filename "${{ steps.build-iso.outputs.iso_filename }}" \
+            --arg iso_sha256 "${{ steps.build-iso.outputs.iso_sha256 }}" \
+            --argjson iso_size "${ISO_SIZE}" \
+            --arg l1_result "${L1_RESULT:-unknown}" \
+            --arg l2_result "${L2_RESULT}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg run_number "${{ github.run_number }}" \
+            --arg run_attempt "${{ github.run_attempt }}" \
+            --arg event_name "${{ github.event_name }}" \
+            --arg triggered_by "${{ github.actor }}" \
+            --arg nixpkgs_rev "${NIXPKGS_REV}" \
+            '{
+              project: $project,
+              version: $version,
+              git: {
+                commit: $commit,
+                ref: $ref,
+                ref_name: $ref_name,
+                repository: $repository
+              },
+              build: {
+                timestamp: $timestamp,
+                duration_seconds: $duration,
+                server_type: $server_type,
+                location: $location,
+                nix_version: $nix_version,
+                runner_label: $runner_label
+              },
+              iso: {
+                filename: $iso_filename,
+                sha256: $iso_sha256,
+                size_bytes: $iso_size
+              },
+              reproducibility: {
+                l1_same_store: $l1_result,
+                l2_full_rebuild: $l2_result
+              },
+              workflow: {
+                run_id: $run_id,
+                run_number: $run_number,
+                run_attempt: $run_attempt,
+                event_name: $event_name,
+                triggered_by: $triggered_by
+              },
+              nixpkgs: {
+                revision: $nixpkgs_rev
+              }
+            }' > dist/build-metadata.json
 
           echo "Build metadata:"
           cat dist/build-metadata.json
+
+      # -----------------------------------------------------------------------
+      # Capture checksums.txt and build-metadata.json contents as step outputs
+      # so they can be passed through workflow_call outputs to release.yml,
+      # eliminating the need for release.yml to download a GitHub artifact.
+      # -----------------------------------------------------------------------
+      - name: Capture metadata outputs
+        id: capture-metadata
+        run: |
+          # Use base64 to safely encode multiline content, avoiding EOF delimiter
+          # collision and extra-newline corruption in GITHUB_OUTPUT multiline values.
+          CHECKSUMS_B64=$(base64 -w 0 < dist/checksums.txt)
+          BUILD_METADATA_B64=$(base64 -w 0 < dist/build-metadata.json)
+          echo "checksums_content_b64=${CHECKSUMS_B64}" >> "$GITHUB_OUTPUT"
+          echo "build_metadata_content_b64=${BUILD_METADATA_B64}" >> "$GITHUB_OUTPUT"
 
       # -----------------------------------------------------------------------
       # Upload ISO directly to Cloudflare R2 from the build runner.
       # Doing this here — on the Hetzner server that built the ISO — avoids
       # routing 4+ GB through GitHub's artifact storage (which consumes the
       # Pro plan's 1 GB shared quota and requires a second upload later).
-      # Downstream jobs (publish-latest, release.yml) fetch from R2 instead.
+      # Downstream jobs (release.yml) fetch from R2 instead.
       # -----------------------------------------------------------------------
       - name: Install AWS CLI
         if: github.event_name == 'workflow_call' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -993,8 +1083,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-            echo "::warning::R2 credentials not configured — skipping R2 upload"
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ] || [ -z "${R2_ENDPOINT:-}" ] || [ -z "${R2_BUCKET:-}" ]; then
+            echo "::warning::R2 not fully configured (need R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET_NAME) — skipping R2 upload"
             echo "r2_uploaded=false" >> "$GITHUB_OUTPUT"
             echo "iso_name=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -1039,7 +1129,7 @@ jobs:
       # for release notes, checksums, and attestation subjects.
       # -----------------------------------------------------------------------
       - name: Upload build metadata artifacts
-        if: github.event_name == 'workflow_call' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: nails-os-iso-${{ github.sha }}
@@ -1048,6 +1138,108 @@ jobs:
             dist/build-metadata.json
           retention-days: 1
           if-no-files-found: error
+
+      # -----------------------------------------------------------------------
+      # Publish rolling "latest" pre-release (push to main only)
+      # Moved here from a separate job so the server is not torn down while
+      # publish is still running — the delete-runner job now only needs to wait
+      # for build-and-verify (this job), not a separate publish job.
+      # -----------------------------------------------------------------------
+      - name: Install GitHub CLI for publish
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          sudo apt-get update -qq
+          sudo mkdir -p -m 755 /etc/apt/keyrings
+          wget -nv -O /tmp/githubcli-keyring.gpg \
+            https://cli.github.com/packages/githubcli-archive-keyring.gpg
+          sudo cp /tmp/githubcli-keyring.gpg /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y gh
+
+      - name: Publish to latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+          R2_ISO_NAME: ${{ steps.r2-upload.outputs.iso_name }}
+          R2_UPLOADED: ${{ steps.r2-upload.outputs.r2_uploaded }}
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          TAG="latest-${SHORT_SHA}"
+          TITLE="NAILS OS (${SHORT_SHA})"
+
+          echo "::group::Preparing release metadata"
+          for f in checksums.txt build-metadata.json; do
+            if [ ! -f "dist/$f" ]; then
+              echo "::error::Missing required metadata file: $f"
+              exit 1
+            fi
+          done
+
+          ISO_NAME="${R2_ISO_NAME}"
+          if [ -z "${ISO_NAME}" ]; then
+            ISO_NAME=$(jq -r '.iso.filename // "unknown.iso"' dist/build-metadata.json)
+          fi
+          ISO_SHA256=$(awk '{print $1}' dist/checksums.txt | head -1)
+          ISO_SIZE_MB=$(jq -r '(.iso.size_bytes // 0) | . / 1048576 | floor' dist/build-metadata.json)
+          echo "ISO name: $ISO_NAME"
+          ls -lh dist/
+          echo "::endgroup::"
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "::notice::Release ${TAG} already exists — skipping (idempotent)."
+            RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
+            echo "::notice::Existing release: $RELEASE_URL"
+            exit 0
+          fi
+
+          if [ -n "${R2_PUBLIC_URL:-}" ]; then
+            DOWNLOAD_LINK="[**Download ${ISO_NAME}**](${R2_PUBLIC_URL}/latest/${ISO_NAME})"
+          else
+            DOWNLOAD_LINK="> R2 public URL not configured — ISO was uploaded to R2 but no public link is available."
+          fi
+
+          cat > /tmp/release-notes.md << EOF
+          Rolling build from \`main\` branch.
+
+          ${DOWNLOAD_LINK}
+
+          | Property | Value |
+          |----------|-------|
+          | **ISO filename** | \`${ISO_NAME}\` |
+          | **ISO SHA256** | \`${ISO_SHA256}\` |
+          | **ISO size** | ${ISO_SIZE_MB} MB |
+          | **Commit** | [\`${SHORT_SHA}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
+          | **Ref** | \`${{ github.ref_name }}\` |
+          | **Built** | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
+
+          ### Verify integrity
+
+          After downloading the ISO and \`checksums.txt\` from this release:
+          \`\`\`bash
+          sha256sum -c checksums.txt
+          \`\`\`
+
+          > This is an automated pre-release from \`main\`.
+          > For stable releases, see the versioned tags (\`v*\`).
+          EOF
+
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --notes-file /tmp/release-notes.md \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            dist/checksums.txt dist/build-metadata.json
+
+          RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
+          echo "::notice::Published release: $RELEASE_URL"
 
       # -----------------------------------------------------------------------
       # Calculate session cost for summary
@@ -1157,144 +1349,13 @@ jobs:
           printf '| **Session cost** | ~€%s (%sh) |\n' "${{ steps.session-cost.outputs.session_cost_eur }}" "${{ steps.session-cost.outputs.session_hours }}" >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
-  # Job 2b: Publish rolling pre-release (push to main only)
-  # ===========================================================================
-  # On every successful push-to-main build, create a new pre-release tagged
-  # latest-{short_sha} with checksums and build metadata. The ISO itself is
-  # hosted on Cloudflare R2 (latest/). Releases are never deleted — each
-  # build produces a permanent, immutable record.
-  #
-  # This does NOT run on:
-  #   - Pull requests (no release for untested code)
-  #   - workflow_call (release.yml handles its own release creation)
-  #   - workflow_dispatch (manual builds are for testing, not releasing)
-  # ===========================================================================
-  publish-latest:
-    needs: [create-runner, build-and-verify]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ${{ needs.create-runner.outputs.label }}
-    timeout-minutes: 60
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Download build metadata artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: nails-os-iso-${{ github.sha }}
-          path: dist/
-
-      - name: Install GitHub CLI and dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo mkdir -p -m 755 /etc/apt/keyrings
-          wget -nv -O /tmp/githubcli-keyring.gpg \
-            https://cli.github.com/packages/githubcli-archive-keyring.gpg
-          sudo cp /tmp/githubcli-keyring.gpg /etc/apt/keyrings/githubcli-archive-keyring.gpg
-          sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y gh jq
-
-      - name: Publish to latest release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
-          R2_ISO_NAME: ${{ needs.build-and-verify.outputs.r2_iso_name }}
-          R2_UPLOADED: ${{ needs.build-and-verify.outputs.r2_uploaded }}
-        run: |
-          set -euo pipefail
-
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
-          TAG="latest-${SHORT_SHA}"
-          TITLE="NAILS OS (${SHORT_SHA})"
-
-          echo "::group::Preparing release metadata"
-          # Verify metadata files are present (artifact contains checksums.txt + build-metadata.json)
-          for f in checksums.txt build-metadata.json; do
-            if [ ! -f "dist/$f" ]; then
-              echo "::error::Missing required metadata file: $f"
-              exit 1
-            fi
-          done
-
-          ISO_NAME="${R2_ISO_NAME}"
-          if [ -z "${ISO_NAME}" ]; then
-            # Fall back to filename from build-metadata.json if R2 upload was skipped
-            ISO_NAME=$(jq -r '.iso.filename // "unknown.iso"' dist/build-metadata.json)
-          fi
-          ISO_SHA256=$(awk '{print $1}' dist/checksums.txt | head -1)
-          ISO_SIZE_MB=$(jq -r '(.iso.size_bytes // 0) | . / 1048576 | floor' dist/build-metadata.json)
-          echo "ISO name: $ISO_NAME"
-          ls -lh dist/
-          echo "::endgroup::"
-
-          # Skip if this tag already exists (idempotent re-runs)
-          if gh release view "$TAG" --repo "${{ github.repository }}" &>/dev/null; then
-            echo "::notice::Release ${TAG} already exists — skipping (idempotent)."
-            RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
-            echo "::notice::Existing release: $RELEASE_URL"
-            exit 0
-          fi
-
-          # Build download link
-          if [ -n "${R2_PUBLIC_URL:-}" ]; then
-            DOWNLOAD_LINK="[**Download ${ISO_NAME}**](${R2_PUBLIC_URL}/latest/${ISO_NAME})"
-          else
-            DOWNLOAD_LINK="> R2 public URL not configured — ISO was uploaded to R2 but no public link is available."
-          fi
-
-          # Write release notes to file to avoid shell quoting issues
-          cat > /tmp/release-notes.md << EOF
-          Rolling build from \`main\` branch.
-
-          ${DOWNLOAD_LINK}
-
-          | Property | Value |
-          |----------|-------|
-          | **ISO filename** | \`${ISO_NAME}\` |
-          | **ISO SHA256** | \`${ISO_SHA256}\` |
-          | **ISO size** | ${ISO_SIZE_MB} MB |
-          | **Commit** | [\`${SHORT_SHA}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
-          | **Ref** | \`${{ github.ref_name }}\` |
-          | **Built** | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
-
-          ### Verify integrity
-
-          After downloading the ISO and \`checksums.txt\` from this release:
-          \`\`\`bash
-          sha256sum -c checksums.txt
-          \`\`\`
-
-          > This is an automated pre-release from \`main\`.
-          > For stable releases, see the versioned tags (\`v*\`).
-          EOF
-
-          gh release create "$TAG" \
-            --repo "${{ github.repository }}" \
-            --title "$TITLE" \
-            --notes-file /tmp/release-notes.md \
-            --target "${{ github.sha }}" \
-            --prerelease \
-            dist/checksums.txt dist/build-metadata.json
-
-          RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
-          echo "::notice::Published release: $RELEASE_URL"
-
-  # ===========================================================================
   # Job 3: Destroy the Hetzner Cloud server
   # ===========================================================================
   # MUST run unconditionally (if: always()) to prevent orphaned servers that
   # would continue to accrue charges. This is the billing safety net.
   # ===========================================================================
   delete-runner:
-    needs: [create-runner, build-and-verify, publish-latest]
+    needs: [create-runner, build-and-verify]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: always()

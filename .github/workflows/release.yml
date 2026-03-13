@@ -91,34 +91,45 @@ jobs:
       # 1. Checkout — required for `gh` CLI repository context
       # -----------------------------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       # -----------------------------------------------------------------------
-      # 2. Download build artifacts produced by the build job
+      # 2. Reconstruct metadata files from workflow_call outputs.
+      # The files are passed directly through job outputs instead of GitHub
+      # artifact storage, which was unreliable across workflow boundaries.
       # -----------------------------------------------------------------------
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: nails-os-iso-${{ github.sha }}
-          path: dist/
-
-      - name: Verify downloaded artifacts
+      - name: Reconstruct metadata from build outputs
+        env:
+          CHECKSUMS_B64: ${{ needs.build.outputs.checksums_content }}
+          BUILD_METADATA_B64: ${{ needs.build.outputs.build_metadata_content }}
         run: |
-          echo "--- Downloaded artifacts ---"
+          mkdir -p dist
+          # Outputs are base64-encoded to safely transport multiline content
+          # through GitHub Actions workflow outputs without EOF delimiter collisions
+          printf '%s' "$CHECKSUMS_B64" | base64 -d > dist/checksums.txt
+          printf '%s' "$BUILD_METADATA_B64" | base64 -d > dist/build-metadata.json
+
+      - name: Verify reconstructed artifacts
+        run: |
+          echo "--- Reconstructed artifacts ---"
           ls -la dist/
           echo ""
 
-          # Ensure required metadata files are present (ISO is on R2, not in the artifact)
+          # Ensure required metadata files are present and non-empty
           for file in checksums.txt build-metadata.json; do
             if [ ! -f "dist/${file}" ]; then
               echo "::error::Missing required artifact: ${file}"
               exit 1
             fi
+            if [ ! -s "dist/${file}" ]; then
+              echo "::error::Artifact is empty: ${file}"
+              exit 1
+            fi
           done
 
-          echo "All required artifacts present."
+          echo "All required artifacts present and non-empty."
           echo ""
           echo "--- checksums.txt ---"
           cat dist/checksums.txt
@@ -232,7 +243,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Create artifact attestation
         if: steps.repo.outputs.is_public == 'true'
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@210c1913531a0a5f12dcd9e8a0a3b6d2af02c03e  # v2.4.0
         with:
           subject-path: dist/checksums.txt
 
@@ -408,6 +419,7 @@ jobs:
       # 9. Write job summary with release details
       # -----------------------------------------------------------------------
       - name: Write job summary
+        if: always()
         env:
           RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
           RELEASE_URL: ${{ steps.create_release.outputs.release_url }}

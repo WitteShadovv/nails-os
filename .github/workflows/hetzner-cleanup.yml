@@ -71,6 +71,7 @@ jobs:
             for page in $(seq 2 "$total_pages"); do
               echo "Fetching page ${page}/${total_pages}..."
               page_data=$(curl -sSf \
+                --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
                 -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
                 "https://api.hetzner.cloud/v1/servers?per_page=50&page=${page}")
               page_servers=$(printf '%s' "$page_data" | jq '.servers')
@@ -255,15 +256,21 @@ jobs:
           cat /tmp/issue-body.md
           echo "::endgroup::"
 
-          gh issue create \
+          # Try creating the issue with the 'bug' label first.
+          # Fall back to no label if the label doesn't exist in the repo.
+          # Note: if the first attempt partially succeeded before failing, the
+          # fallback is skipped because the || only triggers on non-zero exit.
+          if ! gh issue create \
             --repo "${{ github.repository }}" \
             --title "$ISSUE_TITLE" \
             --body-file /tmp/issue-body.md \
-            --label "bug" || \
-          gh issue create \
-            --repo "${{ github.repository }}" \
-            --title "$ISSUE_TITLE" \
-            --body-file /tmp/issue-body.md
+            --label "bug"; then
+            echo "::warning::Could not create issue with 'bug' label — retrying without label"
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$ISSUE_TITLE" \
+              --body-file /tmp/issue-body.md
+          fi
 
       # -------------------------------------------------------------------------
       # Step 4 — Write job summary (always runs)
