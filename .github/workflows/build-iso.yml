@@ -60,6 +60,12 @@ on:
         required: true
       HCLOUD_TOKEN:
         required: true
+      R2_ENDPOINT:
+        required: false
+      R2_ACCESS_KEY_ID:
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -1103,7 +1109,7 @@ jobs:
           name: nails-os-iso-${{ github.sha }}
           path: dist/
 
-      - name: Install GitHub CLI
+      - name: Install GitHub CLI and AWS CLI
         run: |
           (type -p wget >/dev/null || (sudo apt-get update && sudo apt-get install wget -y)) \
             && sudo mkdir -p -m 755 /etc/apt/keyrings \
@@ -1112,11 +1118,41 @@ jobs:
             && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
             && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
             && sudo apt-get update \
-            && sudo apt-get install gh -y
+            && sudo apt-get install gh awscli -y
+
+      - name: Upload ISO to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::warning::R2 credentials not configured — skipping R2 upload"
+            echo "r2_uploaded=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::group::Uploading ISO to R2"
+          ISO_FILE=$(find dist -name '*.iso' -type f | head -1)
+          ISO_NAME=$(basename "$ISO_FILE")
+
+          aws s3 cp "$ISO_FILE" "s3://${R2_BUCKET}/latest/${ISO_NAME}" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --no-progress
+
+          echo "Uploaded ${ISO_NAME} to R2 latest/"
+          echo "r2_uploaded=true" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+        id: r2-upload
 
       - name: Publish to latest release
         env:
           GH_TOKEN: ${{ github.token }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
         run: |
           set -euo pipefail
 
@@ -1132,6 +1168,8 @@ jobs:
 
           ISO_FILE=$(find dist -name '*.iso' -type f | head -1)
           ISO_NAME=$(basename "$ISO_FILE")
+          ISO_SHA256=$(awk '{print $1}' dist/SHA256SUMS | head -1)
+          ISO_SIZE_MB=$(( $(stat -c%s "$ISO_FILE") / 1048576 ))
           echo "ISO: $ISO_NAME"
           ls -lh dist/
           echo "::endgroup::"
@@ -1143,18 +1181,33 @@ jobs:
             gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
           fi
 
-          # Create the release
-          # --target ensures the release points to the actual commit that was built
+          # Build download link
+          if [ -n "${R2_PUBLIC_URL:-}" ]; then
+            DOWNLOAD_LINK="[**Download ${ISO_NAME}**](${R2_PUBLIC_URL}/latest/${ISO_NAME})"
+          else
+            DOWNLOAD_LINK="> R2 public URL not configured — ISO was uploaded to R2 but no public link is available."
+          fi
+
+          # Create the release (metadata only — ISO is hosted on R2)
           NOTES="Rolling build from \`main\` branch.
 
-          **Commit:** \`${{ github.sha }}\`
-          **Built:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          ${DOWNLOAD_LINK}
+
+          | Property | Value |
+          |----------|-------|
+          | **ISO filename** | \`${ISO_NAME}\` |
+          | **ISO SHA256** | \`${ISO_SHA256}\` |
+          | **ISO size** | ${ISO_SIZE_MB} MB |
+          | **Commit** | \`${{ github.sha }}\` |
+          | **Ref** | \`${{ github.ref_name }}\` |
+          | **Built** | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
 
           > This is an automated pre-release updated on every push to \`main\`.
           > For stable releases, see the versioned tags (\`v*\`).
 
-          \`\`\`
-          $(cat dist/SHA256SUMS)
+          **Verify integrity:**
+          \`\`\`bash
+          echo '$(cat dist/SHA256SUMS)' | sha256sum -c
           \`\`\`"
 
           gh release create "$TAG" \
@@ -1163,7 +1216,7 @@ jobs:
             --notes "$NOTES" \
             --target "${{ github.sha }}" \
             --prerelease \
-            dist/*.iso dist/SHA256SUMS dist/build-metadata.json
+            dist/SHA256SUMS dist/build-metadata.json
 
           RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
           echo "::notice::Published latest release: $RELEASE_URL"
