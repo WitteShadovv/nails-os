@@ -673,6 +673,18 @@ jobs:
       r2_uploaded: ${{ steps.r2-upload.outputs.r2_uploaded }}
     steps:
       # -----------------------------------------------------------------------
+      # Install host dependencies
+      # jq and unzip are not pre-installed on Ubuntu 24.04 minimal cloud
+      # images. Install them first so every subsequent step can rely on them
+      # unconditionally (jq is used in session-cost; unzip is used by the AWS
+      # CLI installer).
+      # -----------------------------------------------------------------------
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq unzip
+
+      # -----------------------------------------------------------------------
       # Checkout
       # -----------------------------------------------------------------------
       - name: Checkout code
@@ -966,6 +978,7 @@ jobs:
           curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -q awscliv2.zip
           sudo ./aws/install
+          rm -rf awscliv2.zip aws/
 
       - name: Upload ISO to Cloudflare R2
         id: r2-upload
@@ -1175,16 +1188,18 @@ jobs:
           name: nails-os-iso-${{ github.sha }}
           path: dist/
 
-      - name: Install GitHub CLI
+      - name: Install GitHub CLI and dependencies
         run: |
-          (type -p wget >/dev/null || (sudo apt-get update && sudo apt-get install wget -y)) \
-            && sudo mkdir -p -m 755 /etc/apt/keyrings \
-            && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-            && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-            && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-            && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-            && sudo apt-get update \
-            && sudo apt-get install gh -y
+          sudo apt-get update -qq
+          sudo mkdir -p -m 755 /etc/apt/keyrings
+          wget -nv -O /tmp/githubcli-keyring.gpg \
+            https://cli.github.com/packages/githubcli-archive-keyring.gpg
+          sudo cp /tmp/githubcli-keyring.gpg /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y gh jq
 
       - name: Publish to latest release
         env:
