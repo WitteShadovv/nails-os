@@ -102,13 +102,7 @@ jobs:
           ls -la dist/
           echo ""
 
-          # Ensure at least one ISO file is present
-          if ! test -n "$(find dist -name '*.iso' -type f)"; then
-            echo "::error::No .iso file found in dist/"
-            exit 1
-          fi
-
-          # Ensure other critical files are present
+          # Ensure required metadata files are present (ISO is on R2, not in the artifact)
           for file in SHA256SUMS build-metadata.json; do
             if [ ! -f "dist/${file}" ]; then
               echo "::error::Missing required artifact: ${file}"
@@ -204,44 +198,8 @@ jobs:
           echo "::notice::Release ${RELEASE_NAME} (${TAG}) — prerelease=${PRERELEASE}, reproducible=${REPRODUCIBLE}"
 
       # -----------------------------------------------------------------------
-      # 4. Upload ISO to Cloudflare R2
+      # 4. Check repository visibility
       # -----------------------------------------------------------------------
-      - name: Install AWS CLI
-        run: |
-          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -q awscliv2.zip
-          sudo ./aws/install
-
-      - name: Upload ISO to Cloudflare R2
-        id: r2-upload
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ vars.R2_BUCKET_NAME }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-            echo "::warning::R2 credentials not configured — skipping R2 upload"
-            echo "r2_uploaded=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "::group::Uploading ISO to R2"
-          ISO_FILE=$(find dist -name '*.iso' -type f | head -1)
-          ISO_NAME=$(basename "$ISO_FILE")
-
-          aws s3 cp "$ISO_FILE" "s3://${R2_BUCKET}/stable/${ISO_NAME}" \
-            --endpoint-url "${R2_ENDPOINT}" \
-            --no-progress
-
-          echo "iso_name=${ISO_NAME}" >> "$GITHUB_OUTPUT"
-          echo "r2_uploaded=true" >> "$GITHUB_OUTPUT"
-          echo "Uploaded ${ISO_NAME} to R2 stable/"
-          echo "::endgroup::"
-
       - name: Check repository visibility
         id: repo
         env:
@@ -260,14 +218,15 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 5. Create build provenance attestation (public repos only)
-      #    This cryptographically links the ISO artifact to this workflow run
-      #    using Sigstore-based OIDC signing.
+      #    Attests the SHA256SUMS file, which is cryptographically tied to the
+      #    ISO (the ISO's checksum is inside it). The ISO itself is on R2 and
+      #    is not available in this runner's workspace.
       # -----------------------------------------------------------------------
       - name: Create artifact attestation
         if: steps.repo.outputs.is_public == 'true'
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/*.iso
+          subject-path: dist/SHA256SUMS
 
       # -----------------------------------------------------------------------
       # 6. Generate release notes body
@@ -285,8 +244,8 @@ jobs:
           IS_PUBLIC: ${{ steps.repo.outputs.is_public }}
           REPOSITORY: ${{ github.repository }}
           R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
-          R2_ISO_NAME: ${{ steps.r2-upload.outputs.iso_name }}
-          R2_UPLOADED: ${{ steps.r2-upload.outputs.r2_uploaded }}
+          R2_ISO_NAME: ${{ needs.build.outputs.r2_iso_name }}
+          R2_UPLOADED: ${{ needs.build.outputs.r2_uploaded }}
         run: |
           python3 - << 'PYEOF'
           import os
