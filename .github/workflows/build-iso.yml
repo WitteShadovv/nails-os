@@ -1181,6 +1181,7 @@ jobs:
     steps:
       - name: Track cumulative cost
         if: needs.create-runner.outputs.server_id != ''
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
@@ -1242,8 +1243,13 @@ jobs:
           SESSION_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
 
           # Read current cumulative cost from GitHub variable
-          CURRENT_TOTAL=$(gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
-            --jq '.value' 2>/dev/null || echo "0.0000")
+          _raw_total=$(gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
+            --jq '.value' 2>/dev/null) || true
+          if [[ "$_raw_total" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            CURRENT_TOTAL="$_raw_total"
+          else
+            CURRENT_TOTAL="0.0000"
+          fi
 
           # Calculate new total
           NEW_TOTAL=$(awk "BEGIN {printf \"%.10f\", $CURRENT_TOTAL + $SESSION_COST}")
@@ -1256,11 +1262,13 @@ jobs:
           # Update the repository variable (create if it doesn't exist)
           if gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" &>/dev/null; then
             gh api -X PATCH "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
-              -f value="$NEW_TOTAL_FMT"
+              -f value="$NEW_TOTAL_FMT" \
+              || echo "::warning::Failed to PATCH HETZNER_CUMULATIVE_COST_EUR. Cost not persisted."
           else
             gh api -X POST "repos/$REPO/actions/variables" \
               -f name="HETZNER_CUMULATIVE_COST_EUR" \
-              -f value="$NEW_TOTAL_FMT"
+              -f value="$NEW_TOTAL_FMT" \
+              || echo "::warning::Failed to POST HETZNER_CUMULATIVE_COST_EUR. Cost not persisted."
           fi
 
           # Write cost summary to job summary
