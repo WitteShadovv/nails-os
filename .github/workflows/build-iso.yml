@@ -129,10 +129,10 @@ jobs:
               # Find hourly price for this server type and location
               ($pricing.pricing.server_types[] | select(.name == $type) |
                 .prices[] | select(.location == $loc) |
-                .price_hourly.gross | tonumber) as $hourly |
+                .price_hourly.gross // "0" | tonumber) as $hourly |
               ($hours * $hourly)
             ] | add // 0
-          ')
+          ' 2>/dev/null || echo "0")
 
           # Add Primary IPv4 costs
           IPV4_COST=$(echo "$SERVERS" | jq -r --argjson pricing "$PRICING" '
@@ -143,10 +143,10 @@ jobs:
               .location.name as $loc |
               ($pricing.pricing.primary_ips[] | select(.type == "ipv4") |
                 .prices[] | select(.location == $loc) |
-                .price_hourly.gross | tonumber) as $ipv4_hourly |
+                .price_hourly.gross // "0" | tonumber) as $ipv4_hourly |
               ($hours * $ipv4_hourly)
             ] | add // 0
-          ')
+          ' 2>/dev/null || echo "0")
 
           ESTIMATED_COST=$(awk "BEGIN {printf \"%.10f\", $TOTAL_COST + $IPV4_COST}")
           ESTIMATED_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ESTIMATED_COST}")
@@ -1165,7 +1165,7 @@ jobs:
             --prerelease \
             dist/*.iso dist/SHA256SUMS dist/build-metadata.json
 
-          RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url')
+          RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
           echo "::notice::Published latest release: $RELEASE_URL"
           echo "::endgroup::"
 
