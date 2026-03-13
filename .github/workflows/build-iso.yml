@@ -1116,7 +1116,7 @@ jobs:
 
       - name: Publish to latest release
         env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
