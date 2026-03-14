@@ -250,6 +250,19 @@ jobs:
       # -----------------------------------------------------------------------
       # 6. Generate release notes body
       # -----------------------------------------------------------------------
+      - name: Validate R2 outputs
+        env:
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+          R2_ISO_NAME: ${{ needs.build.outputs.r2_iso_name }}
+          R2_UPLOADED: ${{ needs.build.outputs.r2_uploaded }}
+        run: |
+          echo "R2_UPLOADED=${R2_UPLOADED:-<empty>}"
+          echo "R2_ISO_NAME=${R2_ISO_NAME:-<empty>}"
+          echo "R2_PUBLIC_URL=${R2_PUBLIC_URL:+set (redacted)}"
+          if [ "${R2_UPLOADED}" != "true" ]; then
+            echo "::warning::R2 upload output is '${R2_UPLOADED}' (expected 'true'). Download link may fall back to build-metadata.json."
+          fi
+
       - name: Generate release notes
         id: notes
         env:
@@ -267,7 +280,7 @@ jobs:
           R2_UPLOADED: ${{ needs.build.outputs.r2_uploaded }}
         run: |
           python3 - << 'PYEOF'
-          import os
+          import json, os
 
           tag = os.environ["TAG"]
           commit_sha = os.environ["COMMIT_SHA"]
@@ -283,6 +296,17 @@ jobs:
           r2_iso_name = os.environ.get("R2_ISO_NAME", "")
           r2_uploaded = os.environ.get("R2_UPLOADED", "false")
 
+          # Fall back to build-metadata.json for ISO filename if R2 output is missing
+          if not r2_iso_name:
+              try:
+                  with open("dist/build-metadata.json") as f:
+                      meta = json.load(f)
+                  r2_iso_name = meta.get("iso", {}).get("filename", "")
+                  if r2_iso_name:
+                      print(f"::notice::R2_ISO_NAME was empty, resolved from build-metadata.json: {r2_iso_name}")
+              except Exception as e:
+                  print(f"::warning::Could not read ISO name from build-metadata.json: {e}")
+
           if repro_status == "true":
               repro_badge = "Reproducible build verified"
           elif repro_status == "false":
@@ -290,7 +314,7 @@ jobs:
           else:
               repro_badge = "Reproducibility status unknown"
 
-          if r2_uploaded == "true" and r2_public_url and r2_iso_name:
+          if r2_public_url and r2_iso_name:
               download_link = f"[**Download {r2_iso_name}**]({r2_public_url}/stable/{r2_iso_name})"
           else:
               download_link = "> ISO download hosted externally. Check project page for download links."

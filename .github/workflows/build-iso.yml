@@ -682,8 +682,8 @@ jobs:
     permissions:
       contents: write
     outputs:
-      r2_iso_name: ${{ steps.r2-upload.outputs.iso_name }}
-      r2_uploaded: ${{ steps.r2-upload.outputs.r2_uploaded }}
+      r2_iso_name: ${{ steps.r2-upload.outputs.iso_name || steps.build-iso.outputs.iso_filename }}
+      r2_uploaded: ${{ steps.r2-upload.outputs.r2_uploaded || 'false' }}
       checksums_content: ${{ steps.capture-metadata.outputs.checksums_content_b64 }}
       build_metadata_content: ${{ steps.capture-metadata.outputs.build_metadata_content_b64 }}
     steps:
