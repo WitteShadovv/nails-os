@@ -1063,7 +1063,7 @@ jobs:
       # Downstream jobs (release.yml) fetch from R2 instead.
       # -----------------------------------------------------------------------
       - name: Install AWS CLI
-        if: github.event_name == 'workflow_call' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         run: |
           curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -q awscliv2.zip
@@ -1072,7 +1072,7 @@ jobs:
 
       - name: Upload ISO to Cloudflare R2
         id: r2-upload
-        if: github.event_name == 'workflow_call' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
