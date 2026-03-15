@@ -66,6 +66,7 @@ jobs:
       contents: write
     with:
       verify_reproducibility: true
+      r2_prefix: "stable"
     secrets:
       PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}

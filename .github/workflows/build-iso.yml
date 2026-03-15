@@ -52,6 +52,11 @@ on:
         required: false
         type: boolean
         default: true
+      r2_prefix:
+        description: "R2 upload prefix (stable or latest)"
+        required: false
+        type: string
+        default: "latest"
   workflow_call:
     inputs:
       verify_reproducibility:
@@ -59,6 +64,11 @@ on:
         required: false
         type: boolean
         default: true
+      r2_prefix:
+        description: "R2 upload prefix: 'stable' for releases, 'latest' for rolling builds"
+        required: false
+        type: string
+        default: "latest"
     secrets:
       PERSONAL_ACCESS_TOKEN:
         required: true
@@ -118,38 +128,54 @@ jobs:
       - name: Check Hetzner cost budget
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
-          # Mask the token just in case
+          # Mask tokens
           [[ -n "${HCLOUD_TOKEN:-}" ]] && echo "::add-mask::$HCLOUD_TOKEN"
+          [[ -n "${GH_TOKEN:-}" ]] && echo "::add-mask::$GH_TOKEN"
 
           BUDGET_EUR="20.00"
+          REPO="${{ github.repository }}"
+          CURRENT_MONTH=$(date -u +%Y-%m)
 
-          # Get all servers in the project
+          # --- Read cumulative cost from repo variable (JSON: {"month":"YYYY-MM","total":"X.XXXX"}) ---
+          CUMULATIVE_COST="0"
+          if _raw=$(gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
+               --jq '.value' 2>/dev/null); then
+            _stored_month=$(echo "$_raw" | jq -r '.month // empty' 2>/dev/null) || true
+            _stored_total=$(echo "$_raw" | jq -r '.total // empty' 2>/dev/null) || true
+            if [ "$_stored_month" = "$CURRENT_MONTH" ] && [[ "${_stored_total:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+              CUMULATIVE_COST="$_stored_total"
+              echo "Cumulative cost this month ($CURRENT_MONTH): €$CUMULATIVE_COST"
+            else
+              echo "Stored month ('${_stored_month:-}') ≠ current month ('$CURRENT_MONTH') — resetting to €0"
+            fi
+          else
+            echo "::notice::Could not read HETZNER_CUMULATIVE_COST_EUR variable. Assuming €0."
+          fi
+
+          # --- Estimate cost of currently running servers ---
           if ! SERVERS=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
             -H "Authorization: Bearer $HCLOUD_TOKEN" \
             "https://api.hetzner.cloud/v1/servers?per_page=50"); then
-            echo "::warning::Failed to query Hetzner servers API. Skipping budget check."
+            echo "::warning::Failed to query Hetzner servers API. Skipping running-server estimate."
             SERVERS='{"servers":[]}'
           fi
 
-          # Get pricing catalog
           if ! PRICING=$(curl -s --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
             -H "Authorization: Bearer $HCLOUD_TOKEN" \
             "https://api.hetzner.cloud/v1/pricing"); then
-            echo "::warning::Failed to query Hetzner pricing API. Skipping budget check."
+            echo "::warning::Failed to query Hetzner pricing API. Skipping running-server estimate."
             PRICING='{"pricing":{"server_types":[],"primary_ips":[]}}'
           fi
 
-          # Calculate estimated cost from running servers
           TOTAL_COST=$(echo "$SERVERS" | jq -r --argjson pricing "$PRICING" '
             [.servers[] |
-              # Get server creation time and compute hours (rounded up, minimum 1)
               (.created | sub("\\+00:00$"; "Z") | fromdateiso8601) as $created |
               ((now - $created) / 3600 | ceil | if . < 1 then 1 else . end) as $hours |
               .server_type.name as $type |
               .location.name as $loc |
-              # Find hourly price for this server type and location
               ($pricing.pricing.server_types[] | select(.name == $type) |
                 .prices[] | select(.location == $loc) |
                 .price_hourly.gross // "0" | tonumber) as $hourly |
@@ -157,7 +183,6 @@ jobs:
             ] | add // 0
           ' 2>/dev/null || echo "0")
 
-          # Add Primary IPv4 costs
           IPV4_COST=$(echo "$SERVERS" | jq -r --argjson pricing "$PRICING" '
             [.servers[] |
               select(.public_net.ipv4.ip != null) |
@@ -171,19 +196,24 @@ jobs:
             ] | add // 0
           ' 2>/dev/null || echo "0")
 
-          ESTIMATED_COST=$(awk "BEGIN {printf \"%.10f\", $TOTAL_COST + $IPV4_COST}")
-          ESTIMATED_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ESTIMATED_COST}")
+          RUNNING_COST=$(awk "BEGIN {printf \"%.10f\", $TOTAL_COST + $IPV4_COST}")
+          RUNNING_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $RUNNING_COST}")
 
-          echo "Estimated current Hetzner project cost: €$ESTIMATED_COST_FMT (budget: €$BUDGET_EUR)"
-          echo "Note: This is an estimate based on currently running servers only."
+          # --- Budget check: cumulative (tracked) + running servers ---
+          COMBINED_COST=$(awk "BEGIN {printf \"%.10f\", $CUMULATIVE_COST + $RUNNING_COST}")
+          COMBINED_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $CUMULATIVE_COST + $RUNNING_COST}")
 
-          # Compare against budget
-          if awk "BEGIN {exit !($ESTIMATED_COST > $BUDGET_EUR)}"; then
-            echo "::error::Monthly Hetzner spend estimate (~€$ESTIMATED_COST_FMT) exceeds €$BUDGET_EUR budget. Aborting to prevent overspend."
+          echo "Month: $CURRENT_MONTH"
+          echo "Cumulative (tracked): €$CUMULATIVE_COST"
+          echo "Running servers (est): €$RUNNING_COST_FMT"
+          echo "Combined estimate:     €$COMBINED_COST_FMT (budget: €$BUDGET_EUR)"
+
+          if awk "BEGIN {exit !($COMBINED_COST > $BUDGET_EUR)}"; then
+            echo "::error::Monthly Hetzner spend (~€$COMBINED_COST_FMT cumulative + running) exceeds €$BUDGET_EUR budget. Aborting to prevent overspend."
             exit 1
           fi
 
-          echo "✓ Within budget (€$ESTIMATED_COST_FMT / €$BUDGET_EUR)"
+          echo "✓ Within budget (€$COMBINED_COST_FMT / €$BUDGET_EUR)"
 
       # -----------------------------------------------------------------------
       # Combo 1: ccx33 @ nbg1 (8 dedicated vCPU, 32GB RAM, 240GB SSD)
@@ -1063,7 +1093,7 @@ jobs:
       # Downstream jobs (release.yml) fetch from R2 instead.
       # -----------------------------------------------------------------------
       - name: Install AWS CLI
-        if: github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
           curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
           unzip -q awscliv2.zip
@@ -1072,14 +1102,14 @@ jobs:
 
       - name: Upload ISO to Cloudflare R2
         id: r2-upload
-        if: github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ vars.R2_BUCKET_NAME }}
-          EVENT_NAME: ${{ github.event_name }}
+          R2_PREFIX: ${{ inputs.r2_prefix || 'latest' }}
         run: |
           set -euo pipefail
 
@@ -1093,12 +1123,8 @@ jobs:
           ISO_FILE=$(find dist -name '*.iso' -type f | head -1)
           ISO_NAME=$(basename "$ISO_FILE")
 
-          # workflow_call = versioned release → stable/; push to main → latest/
-          if [ "${EVENT_NAME}" = "workflow_call" ]; then
-            R2_PREFIX="stable"
-          else
-            R2_PREFIX="latest"
-          fi
+          # Validate R2_PREFIX — must be 'stable' or 'latest'
+          [[ "$R2_PREFIX" =~ ^(stable|latest)$ ]] || { echo "::error::Invalid R2_PREFIX: $R2_PREFIX"; exit 1; }
 
           echo "::group::Uploading ${ISO_NAME} to R2 ${R2_PREFIX}/"
           aws s3 cp "$ISO_FILE" "s3://${R2_BUCKET}/${R2_PREFIX}/${ISO_NAME}" \
@@ -1425,13 +1451,19 @@ jobs:
           SESSION_COST=$(awk "BEGIN {printf \"%.10f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
           SESSION_COST_FMT=$(awk "BEGIN {printf \"%.4f\", $ELAPSED_HOURS * ($HOURLY_RATE + $IPV4_HOURLY)}")
 
-          # Read current cumulative cost from GitHub variable
-          _raw_total=$(gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
+          # Read current cumulative cost from GitHub variable (JSON: {"month":"YYYY-MM","total":"X.XXXX"})
+          CURRENT_MONTH=$(date -u +%Y-%m)
+          CURRENT_TOTAL="0.0000"
+          _raw=$(gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
             --jq '.value' 2>/dev/null) || true
-          if [[ "$_raw_total" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            CURRENT_TOTAL="$_raw_total"
-          else
-            CURRENT_TOTAL="0.0000"
+          if [ -n "$_raw" ]; then
+            _stored_month=$(echo "$_raw" | jq -r '.month // empty' 2>/dev/null) || true
+            _stored_total=$(echo "$_raw" | jq -r '.total // empty' 2>/dev/null) || true
+            if [ "$_stored_month" = "$CURRENT_MONTH" ] && [[ "${_stored_total:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+              CURRENT_TOTAL="$_stored_total"
+            else
+              echo "Month mismatch or invalid data — resetting cumulative total for $CURRENT_MONTH"
+            fi
           fi
 
           # Calculate new total
@@ -1439,31 +1471,38 @@ jobs:
           NEW_TOTAL_FMT=$(awk "BEGIN {printf \"%.4f\", $CURRENT_TOTAL + $SESSION_COST}")
 
           echo "Session cost: €$SESSION_COST_FMT (${ELAPSED_HOURS}h × $SERVER_TYPE @ $LOCATION)"
+          echo "Month: $CURRENT_MONTH"
           echo "Previous cumulative: €$CURRENT_TOTAL"
           echo "New cumulative: €$NEW_TOTAL_FMT"
+
+          # Write back as JSON with current month
+          NEW_VALUE=$(jq -n --arg month "$CURRENT_MONTH" --arg total "$NEW_TOTAL_FMT" \
+            '{"month":$month,"total":$total}')
 
           # Update the repository variable (create if it doesn't exist)
           if gh api "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" &>/dev/null; then
             gh api -X PATCH "repos/$REPO/actions/variables/HETZNER_CUMULATIVE_COST_EUR" \
-              -f value="$NEW_TOTAL_FMT" \
+              -f value="$NEW_VALUE" \
               || echo "::warning::Failed to PATCH HETZNER_CUMULATIVE_COST_EUR. Cost not persisted."
           else
             gh api -X POST "repos/$REPO/actions/variables" \
               -f name="HETZNER_CUMULATIVE_COST_EUR" \
-              -f value="$NEW_TOTAL_FMT" \
+              -f value="$NEW_VALUE" \
               || echo "::warning::Failed to POST HETZNER_CUMULATIVE_COST_EUR. Cost not persisted."
           fi
 
           # Write cost summary to job summary
+          BUDGET_REMAINING=$(awk "BEGIN {printf \"%.4f\", 20.00 - $NEW_TOTAL}")
           {
-            printf '## Cost Summary\n\n'
+            printf '## Cost Summary (%s)\n\n' "$CURRENT_MONTH"
             printf '| Metric | Value |\n'
             printf '|--------|-------|\n'
             printf '| **This session** | ~€%s (%sh × %s @ %s) |\n' "$SESSION_COST_FMT" "$ELAPSED_HOURS" "$SERVER_TYPE" "$LOCATION"
             printf '| **Cumulative total** | ~€%s |\n' "$NEW_TOTAL_FMT"
             printf '| **Budget** | €20.00 |\n'
-            printf '| **Budget remaining** | ~€%s |\n' "$(awk "BEGIN {printf \"%.4f\", 20.00 - $NEW_TOTAL}")"
+            printf '| **Budget remaining** | ~€%s |\n' "$BUDGET_REMAINING"
             printf '\n> Estimates based on Hetzner pricing API. Actual invoiced amounts may differ.\n'
+            printf '> Cumulative total resets automatically each calendar month (UTC).\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Delete Hetzner Cloud runner
