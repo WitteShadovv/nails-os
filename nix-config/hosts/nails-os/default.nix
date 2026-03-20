@@ -8,8 +8,8 @@
     # Guarded by pathExists so the flake evaluates cleanly before installation.
     ++ lib.optional (builtins.pathExists ./network-mode.nix) ./network-mode.nix
     # Written by the Calamares installer with timezone/locale/keyboard settings.
-    # locale.nix always exists (stub provides UTC/us defaults).
-    ++ [ ./locale.nix ] ++ [
+    # locale.nix and boot-mode.nix always exist (stubs provide safe defaults).
+    ++ [ ./locale.nix ./boot-mode.nix ] ++ [
       ../../modules/base.nix
       ../../modules/network.nix
       ../../modules/security.nix
@@ -21,16 +21,6 @@
       ../../modules/users.nix
       ../../modules/home.nix
     ];
-
-  boot = {
-    loader = {
-      systemd-boot.enable = true;
-      efi = {
-        canTouchEfiVariables = true;
-        efiSysMountPoint = "/boot";
-      };
-    };
-  };
 
   # Do not allow mutable users; set passwords via declarative config if needed.
   users.mutableUsers = false;

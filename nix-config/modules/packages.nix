@@ -21,6 +21,7 @@
       openssh
       tesseract
       ffmpeg
+      libnotify
     ] ++ lib.optional (pkgs.kdePackages ? kleopatra) pkgs.kdePackages.kleopatra
     ++ lib.optional (pkgs ? obfs4) pkgs.obfs4
     ++ lib.optional (pkgs ? snowflake) pkgs.snowflake

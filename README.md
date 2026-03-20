@@ -55,6 +55,7 @@ NAILS OS does **not** protect against:
 
 - **Targeted attacks by well-resourced adversaries with physical access** to the running machine (cold boot attacks, hardware implants).
 - **Compromised firmware or BIOS** — NAILS OS runs on commodity hardware and trusts the firmware layer.
+- **Evil maid attacks on BIOS installs** — on BIOS/legacy hardware the `/boot` partition is unencrypted and can be tampered with by an attacker with physical access to the powered-off machine. See [`docs/SECURITY.md`](docs/SECURITY.md).
 - **User error** — if you log into personal accounts over Tor, you deanonymize yourself.
 - **Correlation attacks** — a global passive adversary can correlate Tor entry and exit traffic.
 - **Exit node eavesdropping** — unencrypted traffic leaving the Tor network is visible to the exit relay. Always use HTTPS or end-to-end encryption for sensitive communications.
@@ -68,10 +69,10 @@ No software can substitute for sound operational security practices.
 | Requirement | Details |
 |---|---|
 | Architecture | x86_64 only |
-| Boot | UEFI required (systemd-boot, not GRUB) |
+| Boot | UEFI (systemd-boot) or Legacy BIOS (GRUB 2) |
 | RAM | 4 GB minimum (root filesystem runs entirely from RAM) |
 | USB | 4 GB minimum for the installer ISO |
-| Disk | Any size; fully encrypted (EFI partition + LUKS2 root) |
+| Disk | Any size; fully encrypted. EFI: 1 GiB FAT32 + LUKS2. BIOS: 1 MiB bios_grub + 1 GiB ext4 `/boot` + LUKS2. |
 
 ## Download
 
@@ -136,7 +137,7 @@ gh attestation verify checksums.txt --repo WitteShadovv/nails-os
 6. Review and install.
 7. Reboot into NAILS OS. The system boots into a GNOME desktop.
 
-The installer creates a 1 GiB EFI system partition and a LUKS2-encrypted root partition. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
+The installer detects the boot mode and creates the appropriate layout. On UEFI systems: a 1 GiB FAT32 EFI partition and a LUKS2-encrypted root. On BIOS/legacy systems: a 1 MiB BIOS boot partition, a 1 GiB ext4 `/boot` (unencrypted), and a LUKS2-encrypted root. See [`docs/SECURITY.md`](docs/SECURITY.md) for the security implications of the unencrypted `/boot` on BIOS. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
 
 **Default user:** `amnesia` (UID 1000, member of wheel, networkmanager, video, audio).
 
@@ -246,7 +247,7 @@ nails-os/
       nails-os-iso/            # Installer ISO configuration + Calamares
     modules/                   # Reusable NixOS modules
       base.nix                 # Base system settings
-      boot.nix                 # systemd-boot, initrd, kernel
+      boot.nix                 # bootloader (systemd-boot or GRUB), initrd, kernel
       home.nix                 # Home Manager integration
       storage.nix              # Disk layout, LUKS, mount points
       tor.nix                  # Tor transparent proxy + bridges + nftables
@@ -282,6 +283,9 @@ nix build ./nix-config#nails-os-iso
 
 # Test in QEMU (no USB needed)
 qemu-system-x86_64 -enable-kvm -m 4096 -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom result/iso/*.iso
+
+# Test BIOS/Legacy mode install
+qemu-system-x86_64 -enable-kvm -m 4096 -cdrom result/iso/*.iso
 ```
 
 ## Acknowledgments
