@@ -229,9 +229,11 @@ def get_disk_device(partition_dev):
     trailing partition number (and optional 'p' separator for NVMe).
     """
     try:
-        pkname = run_cmd(
-            "lsblk", "-no", "PKNAME", partition_dev, check=False
-        ).splitlines()[0].strip()
+        pkname = (
+            run_cmd("lsblk", "-no", "PKNAME", partition_dev, check=False)
+            .splitlines()[0]
+            .strip()
+        )
         if pkname:
             return "/dev/" + pkname
     except Exception as ex:
@@ -270,7 +272,9 @@ def read_uid_gid(root, username):
 
 
 def make_hardware_config(
-    boot_uuid, luks_uuid, initrd_modules,
+    boot_uuid,
+    luks_uuid,
+    initrd_modules,
     efi_mode=True,
     grub_disk_device=None,
 ):
@@ -294,15 +298,15 @@ def make_hardware_config(
             '    device = "/dev/disk/by-uuid/{boot_uuid}";\n'
             '    fsType = "vfat";\n'
             '    options = [ "fmask=0077" "dmask=0077" ];\n'
-            '  }};'
+            "  }};"
         ).format(boot_uuid=boot_uuid)
     else:
         boot_fs_block = (
-            '  # BIOS mode: GRUB installs to {grub_disk}\n'
+            "  # BIOS mode: GRUB installs to {grub_disk}\n"
             '  fileSystems."/boot" = {{\n'
             '    device = "/dev/disk/by-uuid/{boot_uuid}";\n'
             '    fsType = "ext4";\n'
-            '  }};'
+            "  }};"
         ).format(boot_uuid=boot_uuid, grub_disk=grub_disk_device or "unknown")
 
     return """\
@@ -622,7 +626,9 @@ def run():
     libcalamares.utils.debug("initrd modules: {}".format(initrd_modules))
 
     hw_config = make_hardware_config(
-        boot_uuid, luks_uuid, initrd_modules,
+        boot_uuid,
+        luks_uuid,
+        initrd_modules,
         efi_mode=efi_mode,
         grub_disk_device=grub_disk_device,
     )
@@ -642,7 +648,7 @@ def run():
             "{\n"
             "  boot.loader.systemd-boot.enable = true;\n"
             "  boot.loader.efi.canTouchEfiVariables = true;\n"
-            "  boot.loader.efi.efiSysMountPoint = \"/boot\";\n"
+            '  boot.loader.efi.efiSysMountPoint = "/boot";\n'
             "  boot.loader.grub.enable = false;\n"
             "}\n"
         )
@@ -653,9 +659,9 @@ def run():
             "{\n"
             "  boot.loader.systemd-boot.enable = false;\n"
             "  boot.loader.grub.enable = true;\n"
-            "  boot.loader.grub.device = \"" + grub_disk_device + "\";\n"
+            '  boot.loader.grub.device = "' + grub_disk_device + '";\n'
             "  boot.loader.grub.efiSupport = false;\n"
-            "  boot.loader.grub.fsIdentifier = \"uuid\";\n"
+            '  boot.loader.grub.fsIdentifier = "uuid";\n'
             "}\n"
         )
 
@@ -820,6 +826,50 @@ def run():
         libcalamares.utils.debug("Wrote network-mode.nix (Tor disabled)")
     else:
         libcalamares.utils.debug("Tor enabled (default) — no network-mode.nix written")
+
+    # ------------------------------------------------------------------
+    # 5d. Write shell-history-mode.nix if user chose to enable shell history
+    #
+    # The packagechooser@historyconfig view step stores the user's selection in
+    # GlobalStorage under key "packagechooser_historyconfig".  Value is the
+    # item id: "disabled" (default) or "enabled".  If the key is absent we keep
+    # history disabled (safe default).
+    # ------------------------------------------------------------------
+    history_disabled = True
+    history_choice = gs.value("packagechooser_historyconfig")
+    if history_choice is not None:
+        history_disabled = history_choice != "enabled"
+    libcalamares.utils.debug(
+        "packagechooser_historyconfig={!r}  historyDisabled={}".format(
+            history_choice, history_disabled
+        )
+    )
+
+    if not history_disabled:
+        status = _("Configuring shell history (enabled)")
+        libcalamares.job.setprogress(0.38)
+
+        shell_history_nix = (
+            "# Written by the Calamares installer — user chose to enable shell history.\n"
+            "{ lib, ... }:\n"
+            "{\n"
+            "  nailsOs.shellHistory.disable = false;\n"
+            "}\n"
+        )
+
+        shell_history_dest = os.path.join(
+            target_nixos, "hosts", "nails-os", "shell-history-mode.nix"
+        )
+        try:
+            write_file(shell_history_dest, shell_history_nix)
+        except RuntimeError as e:
+            return (_("Failed to write shell history configuration"), str(e))
+
+        libcalamares.utils.debug("Wrote shell-history-mode.nix (history enabled)")
+    else:
+        libcalamares.utils.debug(
+            "Shell history disabled (default) — no shell-history-mode.nix written"
+        )
 
     # ------------------------------------------------------------------
     # 6. Prepare the /persist directory tree

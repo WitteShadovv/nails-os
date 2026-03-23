@@ -7,6 +7,10 @@
     # Written by the Calamares installer with the user-chosen network mode.
     # Guarded by pathExists so the flake evaluates cleanly before installation.
     ++ lib.optional (builtins.pathExists ./network-mode.nix) ./network-mode.nix
+    # Written by the Calamares installer with the user-chosen shell history mode.
+    # Guarded by pathExists so the flake evaluates cleanly before installation.
+    ++ lib.optional (builtins.pathExists ./shell-history-mode.nix)
+    ./shell-history-mode.nix
     # Written by the Calamares installer with timezone/locale/keyboard settings.
     # locale.nix and boot-mode.nix always exist (stubs provide safe defaults).
     ++ [ ./locale.nix ./boot-mode.nix ] ++ [
@@ -17,6 +21,7 @@
       ../../modules/storage.nix
       ../../modules/impermanence.nix
       ../../modules/tor.nix
+      ../../modules/shell-history.nix
       ../../modules/packages.nix
       ../../modules/users.nix
       ../../modules/home.nix
