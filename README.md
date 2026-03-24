@@ -25,6 +25,7 @@ Designed for journalists, activists, researchers, and anyone who needs to leave 
 - [Repository Setup for CI/CD](#repository-setup-for-cicd)
 - [Cost Tracking & Budget Protection](#cost-tracking--budget-protection)
 - [Repository Structure](#repository-structure)
+- [Security Documentation](#security-documentation)
 - [Contributing](#contributing)
 - [Acknowledgments](#acknowledgments)
 - [License](#license)
@@ -262,6 +263,11 @@ nails-os/
   LICENSE
 ```
 
+## Security Documentation
+
+- Public vulnerability policy: [`SECURITY.md`](SECURITY.md)
+- Security operations hub (SBOM, dependency hygiene, vulnerability workflow): [`docs/security/index.md`](docs/security/index.md)
+
 ## Contributing
 
 The project uses pre-commit hooks for code quality:
@@ -270,7 +276,9 @@ The project uses pre-commit hooks for code quality:
 pre-commit install
 ```
 
-Hooks include: `nixfmt` (formatting), `deadnix` (dead code), `statix` (linting), `nix-instantiate --parse` (syntax), `nix-flake-update` (automatically updates `flake.lock` on every commit), `detect-secrets`, standard checks (trailing whitespace, YAML/JSON validation, merge conflict detection), and a full NixOS configuration evaluation.
+Hooks include: `nixfmt` (formatting), `deadnix` (dead code), `statix` (linting), `nix-instantiate --parse` (syntax), `detect-secrets`, standard checks (trailing whitespace, YAML/JSON validation, merge conflict detection), and a full NixOS configuration evaluation.
+
+Dependency updates are intentional and maintainer-reviewed. Follow the policy in [`docs/security/dependency-hygiene.md`](docs/security/dependency-hygiene.md).
 
 To test changes locally:
 
