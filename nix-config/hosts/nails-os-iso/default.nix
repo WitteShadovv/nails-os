@@ -159,6 +159,7 @@ in {
         makeWrapper ${rawBin} $out/bin/calamares \
           --prefix XDG_DATA_DIRS   : "${upstExt}/share" \
           --prefix XDG_DATA_DIRS   : "${ext}/share" \
+          --prefix XDG_CONFIG_DIRS : "${ext}/etc" \
           --add-flags "--xdg-config"
       '';
     })
