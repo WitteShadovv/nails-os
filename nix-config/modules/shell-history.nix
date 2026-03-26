@@ -8,23 +8,30 @@
   };
 
   config = lib.mkIf config.nailsOs.shellHistory.disable {
-    # Defense layer 1: Environment variables
-    # These are set system-wide and apply to all shells.
+    # Defense layer 1: System-wide environment variables.
+    # HISTFILE is intentionally NOT set here — setting it to /dev/null is
+    # actively harmful: bash will delete the device node when it truncates an
+    # oversized history file (GNU bash bug, Jan 2015), and zsh produces locking
+    # errors when it tries to acquire a file lock on a character device.
+    # The correct approach is to *unset* HISTFILE in shell init (layers 2 & 3).
+    # HISTSIZE/HISTFILESIZE/SAVEHIST=0 here add a first-pass defence for any
+    # process that inherits the environment before shell init runs.
     environment.variables = {
-      HISTFILE = "/dev/null";
       HISTSIZE = "0";
       HISTFILESIZE = "0";
       HISTCONTROL = "ignoreboth";
       SAVEHIST = "0";
     };
 
-    # Defense layer 2: Shell profile scripts via environment.etc
+    # Defense layer 2: Shell profile scripts via environment.etc.
+    # These run early in every interactive login shell (before user dotfiles).
     environment.etc = {
-      # Bash profile script in /etc/profile.d/
+      # Bash: sourced by /etc/profile on every login shell.
       "profile.d/nails-disable-history.sh" = {
         mode = "0444";
         text = ''
-          # NAILS OS: Disable bash history (defense layer 2)
+          # NAILS OS: Disable bash history (layer 2)
+          # Unset instead of pointing to /dev/null — no file is ever opened.
           unset HISTFILE
           export HISTSIZE=0
           export HISTFILESIZE=0
@@ -32,12 +39,14 @@
         '';
       };
 
-      # Zsh profile script in /etc/zshrc.d/
-      # The 00- prefix ensures it runs before other zsh configs.
+      # Zsh: sourced via /etc/zshrc.d/ for every interactive zsh.
+      # 00- prefix guarantees execution before any user zshrc.
       "zshrc.d/00-nails-disable-history.zsh" = {
         mode = "0444";
         text = ''
-          # NAILS OS: Disable zsh history (defense layer 2)
+          # NAILS OS: Disable zsh history (layer 2)
+          # zsh mailing list (2011): setting HISTFILE=/dev/null triggers locking
+          # errors and still wastes cycles saving to the bit-bucket. Unset it.
           unset HISTFILE
           HISTSIZE=0
           SAVEHIST=0
@@ -46,53 +55,26 @@
         '';
       };
 
-      # Fish configuration in /etc/fish/conf.d/
-      # The 00- prefix ensures it runs before other fish configs.
+      # Fish: sourced via /etc/fish/conf.d/ for every interactive fish session.
+      # 00- prefix guarantees execution before user conf.d/ files.
       "fish/conf.d/00-nails-disable-history.fish" = {
         mode = "0444";
         text = ''
-          # NAILS OS: Disable fish history (defense layer 2)
+          # NAILS OS: Disable fish history (layer 2)
+          # Empty string maps to no backing file — history stays in RAM only
+          # and is discarded when the session ends (fish docs: "history.html").
           set -gx fish_history ""
         '';
       };
     };
 
-    # Defense layer 3: Activation script to create symlinks
-    # Runs after user/group creation to ensure home directories exist.
-    system.activationScripts.disableShellHistory =
-      lib.stringAfter [ "users" "groups" ] ''
-        # /etc/skel for new users
-        mkdir -p /etc/skel/.local/share/fish
-        ln -sf /dev/null /etc/skel/.bash_history
-        ln -sf /dev/null /etc/skel/.zsh_history
-        ln -sf /dev/null /etc/skel/.local/share/fish/fish_history
-
-        # Root user
-        rm -f /root/.bash_history /root/.zsh_history 2>/dev/null || true
-        rm -rf /root/.local/share/fish/fish_history 2>/dev/null || true
-        ln -sf /dev/null /root/.bash_history
-        ln -sf /dev/null /root/.zsh_history
-        mkdir -p /root/.local/share/fish
-        ln -sf /dev/null /root/.local/share/fish/fish_history
-
-        # Existing home directories
-        for home in /home/*; do
-          if [ -d "$home" ]; then
-            rm -f "$home/.bash_history" "$home/.zsh_history" 2>/dev/null || true
-            rm -rf "$home/.local/share/fish/fish_history" 2>/dev/null || true
-            ln -sf /dev/null "$home/.bash_history"
-            ln -sf /dev/null "$home/.zsh_history"
-            mkdir -p "$home/.local/share/fish"
-            ln -sf /dev/null "$home/.local/share/fish/fish_history"
-          fi
-        done
-      '';
-
-    # Defense layer 4: Shell program configuration
-    # mkBefore ensures this runs before any user-defined shell init.
+    # Defense layer 3: Shell program configuration via mkBefore.
+    # Runs inside every interactive shell instance, before any user-defined
+    # init.  Catches subshells and shells started outside the login chain
+    # (e.g. terminals launched from a GUI without a login shell).
     programs = {
       bash.interactiveShellInit = lib.mkBefore ''
-        # NAILS OS: Disable bash history (defense layer 4)
+        # NAILS OS: Disable bash history (layer 3)
         unset HISTFILE
         HISTSIZE=0
         HISTFILESIZE=0
@@ -100,7 +82,7 @@
       '';
 
       zsh.interactiveShellInit = lib.mkBefore ''
-        # NAILS OS: Disable zsh history (defense layer 4)
+        # NAILS OS: Disable zsh history (layer 3)
         unset HISTFILE
         HISTSIZE=0
         SAVEHIST=0
@@ -109,7 +91,7 @@
       '';
 
       fish.interactiveShellInit = lib.mkBefore ''
-        # NAILS OS: Disable fish history (defense layer 4)
+        # NAILS OS: Disable fish history (layer 3)
         set -gx fish_history ""
       '';
     };

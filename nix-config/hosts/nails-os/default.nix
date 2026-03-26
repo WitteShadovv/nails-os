@@ -11,6 +11,10 @@
     # Guarded by pathExists so the flake evaluates cleanly before installation.
     ++ lib.optional (builtins.pathExists ./shell-history-mode.nix)
     ./shell-history-mode.nix
+    # Written by the Calamares installer when the user chose full home persistence.
+    # Absent = selective mode (the default). Guarded by pathExists.
+    ++ lib.optional (builtins.pathExists ./home-persistence-mode.nix)
+    ./home-persistence-mode.nix
     # Written by the Calamares installer with timezone/locale/keyboard settings.
     # locale.nix and boot-mode.nix always exist (stubs provide safe defaults).
     ++ [ ./locale.nix ./boot-mode.nix ] ++ [

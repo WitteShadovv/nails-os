@@ -1,4 +1,46 @@
-_: {
+{ config, ... }:
+
+let
+  inherit (config.nailsOs.homePersistence) selective;
+
+  # Helper: persist a subdirectory of /home/amnesia with restrictive permissions.
+  homeDir = subdir: {
+    directory = "/home/amnesia/${subdir}";
+    user = "amnesia";
+    group = "users";
+    mode = "u=rwx,g=,o="; # 700 — owner only
+  };
+
+  # Curated set: user content + low-risk functional state only.
+  # Deliberately excludes recently-used.xbel, gvfs-metadata, tracker3,
+  # zeitgeist, cache/, and full browser profiles — those accumulate forensic
+  # artefacts and are safe to wipe on every reboot.
+  selectiveDirs = map homeDir [
+    # XDG user-content directories
+    "Documents"
+    "Downloads"
+    "Music"
+    "Pictures"
+    "Videos"
+    "Desktop"
+    # GNOME settings (theme, font, keyboard, wallpaper path — low privacy risk)
+    ".config/dconf"
+    # GNOME keyring — WiFi passwords and app credentials
+    ".local/share/keyrings"
+    # Cryptographic identities — functional and intentionally private
+    ".ssh"
+    ".gnupg"
+  ];
+
+  fullHome = [{
+    directory = "/home/amnesia";
+    user = "amnesia";
+    group = "users";
+    mode = "u=rwx,g=,o=";
+  }];
+in {
+  imports = [ ./home-persistence.nix ];
+
   # systemd initrd is required for impermanence's pivot-root behaviour.
   boot.initrd.systemd.enable = true;
 
@@ -16,13 +58,7 @@ _: {
       "/var/lib/systemd/backlight" # Used for screen brightness
       "/var/lib/systemd/rfkill" # Used for bluetooth state
       "/var/lib/bluetooth" # Persist bluetooth connections
-      {
-        directory = "/home/amnesia";
-        user = "amnesia";
-        group = "users";
-        mode = "u=rwx,g=,o=";
-      }
-    ];
+    ] ++ (if selective then selectiveDirs else fullHome);
 
     files = [
       "/etc/machine-id" # Needed for various things like systemd logs

@@ -872,6 +872,50 @@ def run():
         )
 
     # ------------------------------------------------------------------
+    # 5e. Write home-persistence-mode.nix if user chose full home persistence
+    #
+    # The packagechooser@homepersistenceconfig view step stores the choice in
+    # GlobalStorage under key "packagechooser_homepersistenceconfig".
+    # Value is the item id: "selective" (default) or "full".
+    # Absent key → selective (safe default).
+    # ------------------------------------------------------------------
+    home_persistence_full = False
+    home_choice = gs.value("packagechooser_homepersistenceconfig")
+    if home_choice is not None:
+        home_persistence_full = home_choice == "full"
+    libcalamares.utils.debug(
+        "packagechooser_homepersistenceconfig={!r}  homePersistenceFull={}".format(
+            home_choice, home_persistence_full
+        )
+    )
+
+    if home_persistence_full:
+        status = _("Configuring home persistence (full)")
+        libcalamares.job.setprogress(0.39)
+
+        home_persistence_nix = (
+            "# Written by the Calamares installer — user chose full home persistence.\n"
+            "{ ... }:\n"
+            "{\n"
+            "  nailsOs.homePersistence.selective = false;\n"
+            "}\n"
+        )
+
+        home_persistence_dest = os.path.join(
+            target_nixos, "hosts", "nails-os", "home-persistence-mode.nix"
+        )
+        try:
+            write_file(home_persistence_dest, home_persistence_nix)
+        except RuntimeError as e:
+            return (_("Failed to write home persistence configuration"), str(e))
+
+        libcalamares.utils.debug("Wrote home-persistence-mode.nix (full home)")
+    else:
+        libcalamares.utils.debug(
+            "Home persistence selective (default) — no home-persistence-mode.nix written"
+        )
+
+    # ------------------------------------------------------------------
     # 6. Prepare the /persist directory tree
     #
     # Layout on the LUKS ext4 (mounted at <root> by Calamares):
@@ -905,8 +949,37 @@ def run():
         ]:
             run_cmd("mkdir", "-p", os.path.join(persist_root, d))
 
-        run_cmd("mkdir", "-p", os.path.join(persist_root, "home", username))
-        run_cmd("chmod", "700", os.path.join(persist_root, "home", username))
+        # Create home directory backing store in /persist.
+        # Layout differs based on the persistence mode chosen by the user:
+        #   full     → one bind mount covering /home/amnesia entirely
+        #   selective → individual bind mounts per curated subdirectory
+        # In both cases chown -R in step 8 fixes ownership recursively.
+        home_persist = os.path.join(persist_root, "home", username)
+        run_cmd("mkdir", "-p", home_persist)
+        run_cmd("chmod", "700", home_persist)
+
+        if not home_persistence_full:
+            # Selective mode: pre-create each persisted subdirectory so that
+            # impermanence can bind-mount them on first boot without needing
+            # to create them from the initrd (where UIDs may not yet be set).
+            selective_subdirs = [
+                "Documents",
+                "Downloads",
+                "Music",
+                "Pictures",
+                "Videos",
+                "Desktop",
+                os.path.join(".config", "dconf"),
+                os.path.join(".local", "share", "keyrings"),
+                ".ssh",
+                ".gnupg",
+            ]
+            for subdir in selective_subdirs:
+                subdir_path = os.path.join(home_persist, subdir)
+                run_cmd("mkdir", "-p", subdir_path)
+                # Cryptographic and credential directories require strict 700.
+                if subdir in (".ssh", ".gnupg", os.path.join(".local", "share", "keyrings")):
+                    run_cmd("chmod", "700", subdir_path)
 
     except RuntimeError as e:
         return (_("Failed to prepare filesystem layout"), str(e))
