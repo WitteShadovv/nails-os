@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="#7f5af0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Terminal window -->
+  <rect x="6" y="8" width="36" height="32" rx="3" stroke="#e0e0e0"/>
+  <!-- Terminal title bar -->
+  <line x1="6" y1="14" x2="42" y2="14" stroke="#e0e0e0"/>
+  <!-- Window buttons -->
+  <circle cx="11" cy="11" r="1.5" fill="#e0e0e0" stroke="none"/>
+  <circle cx="16" cy="11" r="1.5" fill="#e0e0e0" stroke="none"/>
+  <circle cx="21" cy="11" r="1.5" fill="#e0e0e0" stroke="none"/>
+  <!-- Prompt symbol -->
+  <path d="M12 24l4 4-4 4" stroke="#e0e0e0"/>
+  <line x1="20" y1="32" x2="30" y2="32" stroke="#e0e0e0"/>
+  <!-- Strike-through / eraser diagonal -->
+  <line x1="8" y1="40" x2="40" y2="8" stroke="#7f5af0" stroke-width="3"/>
+</svg>

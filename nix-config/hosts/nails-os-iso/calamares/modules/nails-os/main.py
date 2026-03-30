@@ -311,7 +311,7 @@ def make_hardware_config(
             '    fsType = "none";\n'
             '    options = [ "bind" ];\n'
             '    depends = [ "/persist" ];\n'
-            '    neededForBoot = true;\n'
+            "    neededForBoot = true;\n"
             "  };"
         )
 
@@ -614,8 +614,7 @@ def run():
             return (
                 _("Installation error"),
                 _(
-                    "Could not determine parent disk device for GRUB "
-                    "(LUKS device: {})."
+                    "Could not determine parent disk device for GRUB (LUKS device: {})."
                 ).format(luks_device),
             )
         libcalamares.utils.debug(
@@ -796,15 +795,12 @@ def run():
     # ------------------------------------------------------------------
     # 5c. Write network-mode.nix if user chose to disable Tor
     #
-    # The packagechooser@torconfig view step stores the user's selection in
-    # GlobalStorage under key "packagechooser_torconfig".  Value is the
-    # item id: "tor" (default) or "direct".  If the key is absent we keep
-    # Tor enabled (safe default).
+    # The packagechooser module stores the user's selection in GlobalStorage
+    # under key "packagechooser_packagechooser-tor".  Values are "tor" (default)
+    # or "direct".  If the key is absent we keep Tor enabled (safe default).
     # ------------------------------------------------------------------
-    tor_enabled = True
-    tor_choice = gs.value("packagechooser_torconfig")
-    if tor_choice is not None:
-        tor_enabled = tor_choice != "direct"
+    tor_choice = gs.value("packagechooser_packagechooser-tor") or "tor"
+    tor_enabled = tor_choice != "direct"
     libcalamares.utils.debug(
         "packagechooser_torconfig={!r}  torEnabled={}".format(tor_choice, tor_enabled)
     )
@@ -838,22 +834,20 @@ def run():
     # ------------------------------------------------------------------
     # 5d. Write shell-history-mode.nix if user chose to enable shell history
     #
-    # The packagechooser@historyconfig view step stores the user's selection in
-    # GlobalStorage under key "packagechooser_historyconfig".  Value is the
-    # item id: "disabled" (default) or "enabled".  If the key is absent we keep
-    # history disabled (safe default).
+    # The packagechooser module stores the user's selection in GlobalStorage
+    # under key "packagechooser_packagechooser-history".  Values are "disabled"
+    # (default) or "enabled".  If the key is absent we keep history disabled
+    # (safe default).
     # ------------------------------------------------------------------
-    history_disabled = True
-    history_choice = gs.value("packagechooser_historyconfig")
-    if history_choice is not None:
-        history_disabled = history_choice != "enabled"
+    history_choice = gs.value("packagechooser_packagechooser-history") or "disabled"
+    history_enabled = history_choice == "enabled"
     libcalamares.utils.debug(
-        "packagechooser_historyconfig={!r}  historyDisabled={}".format(
-            history_choice, history_disabled
+        "packagechooser_historyconfig={!r}  historyEnabled={}".format(
+            history_choice, history_enabled
         )
     )
 
-    if not history_disabled:
+    if history_enabled:
         status = _("Configuring shell history (enabled)")
         libcalamares.job.setprogress(0.38)
 
@@ -882,15 +876,15 @@ def run():
     # ------------------------------------------------------------------
     # 5e. Write home-persistence-mode.nix if user chose full home persistence
     #
-    # The packagechooser@homepersistenceconfig view step stores the choice in
-    # GlobalStorage under key "packagechooser_homepersistenceconfig".
-    # Value is the item id: "selective" (default) or "full".
-    # Absent key → selective (safe default).
+    # The packagechooser module stores the user's selection in GlobalStorage
+    # under key "packagechooser_packagechooser-home-persistence".  Values are
+    # "selective" (default) or "full".  If the key is absent we use selective
+    # persistence (safe default).
     # ------------------------------------------------------------------
-    home_persistence_full = False
-    home_choice = gs.value("packagechooser_homepersistenceconfig")
-    if home_choice is not None:
-        home_persistence_full = home_choice == "full"
+    home_choice = (
+        gs.value("packagechooser_packagechooser-home-persistence") or "selective"
+    )
+    home_persistence_full = home_choice == "full"
     libcalamares.utils.debug(
         "packagechooser_homepersistenceconfig={!r}  homePersistenceFull={}".format(
             home_choice, home_persistence_full
@@ -991,7 +985,11 @@ def run():
                 subdir_path = os.path.join(home_persist, subdir)
                 run_cmd("mkdir", "-p", subdir_path)
                 # Cryptographic and credential directories require strict 700.
-                if subdir in (".ssh", ".gnupg", os.path.join(".local", "share", "keyrings")):
+                if subdir in (
+                    ".ssh",
+                    ".gnupg",
+                    os.path.join(".local", "share", "keyrings"),
+                ):
                     run_cmd("chmod", "700", subdir_path)
 
     except RuntimeError as e:

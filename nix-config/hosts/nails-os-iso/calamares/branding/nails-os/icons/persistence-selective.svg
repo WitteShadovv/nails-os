@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="#7f5af0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Folder back -->
+  <path d="M6 14h14l4-4h18v28a2 2 0 01-2 2H8a2 2 0 01-2-2V14z" stroke="#e0e0e0" fill="none"/>
+  <!-- Folder tab -->
+  <path d="M6 14V12a2 2 0 012-2h10l4 4" stroke="#e0e0e0" fill="none"/>
+  <!-- Checkmark items (selective) -->
+  <path d="M14 22l2 2 4-4" stroke="#7f5af0" stroke-width="2.5"/>
+  <path d="M14 30l2 2 4-4" stroke="#7f5af0" stroke-width="2.5"/>
+  <!-- Unchecked item (empty box) -->
+  <rect x="26" y="20" width="8" height="6" rx="1" stroke="#666688" stroke-width="1.5" fill="none"/>
+  <rect x="26" y="28" width="8" height="6" rx="1" stroke="#666688" stroke-width="1.5" fill="none"/>
+</svg>

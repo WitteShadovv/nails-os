@@ -16,6 +16,16 @@ let
       mkdir -p $out/lib/calamares/modules/nails-os
       cp -r modules/nails-os/. $out/lib/calamares/modules/nails-os/
 
+      # Custom viewmodules  →  $out/lib/calamares/modules/<name>/
+      mkdir -p $out/lib/calamares/modules/tor-config
+      cp -r modules/tor-config/. $out/lib/calamares/modules/tor-config/
+
+      mkdir -p $out/lib/calamares/modules/history-config
+      cp -r modules/history-config/. $out/lib/calamares/modules/history-config/
+
+      mkdir -p $out/lib/calamares/modules/home-persistence-config
+      cp -r modules/home-persistence-config/. $out/lib/calamares/modules/home-persistence-config/
+
       # Branding  →  $out/share/calamares/branding/nails-os/
       mkdir -p $out/share/calamares/branding/nails-os
       cp -r branding/nails-os/. $out/share/calamares/branding/nails-os/

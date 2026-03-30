@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="#e0e0e0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Folder back -->
+  <path d="M6 14h14l4-4h18v28a2 2 0 01-2 2H8a2 2 0 01-2-2V14z" fill="#2a2a4e" stroke="#e0e0e0"/>
+  <!-- Folder tab -->
+  <path d="M6 14V12a2 2 0 012-2h10l4 4" stroke="#e0e0e0" fill="none"/>
+  <!-- Fill pattern (indicating full) -->
+  <rect x="12" y="20" width="24" height="14" rx="1" fill="#444466" stroke="none"/>
+  <!-- Warning triangle overlay -->
+  <path d="M36 28l6 10H30l6-10z" fill="#1a1a2e" stroke="#e6a817" stroke-width="2"/>
+  <line x1="36" y1="32" x2="36" y2="35" stroke="#e6a817" stroke-width="2"/>
+  <circle cx="36" cy="37" r="0.8" fill="#e6a817" stroke="none"/>
+</svg>
