@@ -285,7 +285,7 @@ def make_hardware_config(
       /persist → LUKS-encrypted ext4  (device = /dev/disk/by-uuid/<luks_uuid>)
       /nix     → bind mount from /persist/nix
 
-    EFI:  /boot → FAT32 vfat  (EFI system partition, separate partition)
+    EFI:  /boot/efi → FAT32 vfat  (EFI system partition, separate partition)
     BIOS: /boot → bind mount from /persist/boot (inside LUKS1 ext4)
 
     The LUKS container is named "persist" so it opens as /dev/mapper/persist.
@@ -294,7 +294,7 @@ def make_hardware_config(
 
     if efi_mode:
         boot_fs_block = (
-            '  fileSystems."/boot" = {{\n'
+            '  fileSystems."/boot/efi" = {{\n'
             '    device = "/dev/disk/by-uuid/{boot_uuid}";\n'
             '    fsType = "vfat";\n'
             '    options = [ "fmask=0077" "dmask=0077" ];\n'
@@ -653,7 +653,7 @@ def run():
             "{\n"
             "  boot.loader.systemd-boot.enable = true;\n"
             "  boot.loader.efi.canTouchEfiVariables = true;\n"
-            '  boot.loader.efi.efiSysMountPoint = "/boot";\n'
+            '  boot.loader.efi.efiSysMountPoint = "/boot/efi";\n'
             "  boot.loader.grub.enable = false;\n"
             "}\n"
         )

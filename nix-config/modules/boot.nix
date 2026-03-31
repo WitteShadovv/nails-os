@@ -1,8 +1,9 @@
 { config, lib, ... }:
-let
-  bootFs = config.fileSystems."/boot" or null;
-  isVfat = bootFs != null && (bootFs.fsType or "") == "vfat";
-in {
-  # FAT32 /boot (EFI): restrict permissions via mount options.
-  fileSystems."/boot".options = lib.mkIf isVfat (lib.mkAfter [ "umask=0077" ]);
+# Restrict FAT32 EFI partition permissions via mount options.
+# The ESP path comes from boot-mode.nix (/boot/efi for EFI, unused for BIOS).
+# We guard with mkIf so the fileSystems key is never created in BIOS mode
+# (where systemd-boot is disabled and /boot is a bind mount, not vfat).
+lib.mkIf config.boot.loader.systemd-boot.enable {
+  fileSystems.${config.boot.loader.efi.efiSysMountPoint}.options =
+    lib.mkAfter [ "umask=0077" ];
 }
