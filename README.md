@@ -1,14 +1,20 @@
-# NAILS OS
-
-**An amnesic, anti-forensic operating system. All traffic through Tor. Nothing survives reboot. Built declaratively on NixOS.**
+<div align="center">
+  <img src="nix-config/hosts/nails-os-iso/calamares/branding/nails-os/logo.png" alt="NAILS OS logo" width="160" />
+  <h1>NAILS OS</h1>
 
 [![Build ISO](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml/badge.svg)](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![NixOS 25.11](https://img.shields.io/badge/NixOS-25.11-5277C3.svg?logo=nixos&logoColor=white)](https://nixos.org)
 
-NAILS OS is a live Linux distribution designed for privacy, anonymity, and anti-forensic resistance. It routes all network traffic through Tor, runs entirely from RAM, and leaves no trace on the host machine after shutdown. The desktop environment is **GNOME**. Built declaratively on NixOS for reproducibility and auditability.
+</div>
 
-Designed for journalists, activists, researchers, and anyone who needs to leave no trace on shared or borrowed hardware.
+> **A live NixOS distribution that routes all traffic through Tor and discards the root filesystem on every shutdown.**
+>
+> NAILS OS combines a tmpfs root, transparent Tor proxying, and NixOS's declarative configuration
+> system to provide a privacy-oriented computing environment within the documented threat model.
+> Built for reproducibility and auditability.
+
+---
 
 ## Table of Contents
 
