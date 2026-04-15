@@ -1,0 +1,6 @@
+{
+  "$schema": "https://example.com/nails-os/security/ignored-cves.schema.json",
+  "version": 1,
+  "description": "Temporary CVE suppressions. Every entry must be time-bound and justified.",
+  "entries": []
+}

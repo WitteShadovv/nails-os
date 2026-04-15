@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-72 -72 192 192" fill="none" stroke="#e0e0e0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Terminal window -->
+  <rect x="6" y="8" width="28" height="28" rx="3"/>
+  <!-- Terminal title bar -->
+  <line x1="6" y1="14" x2="34" y2="14"/>
+  <!-- Window buttons -->
+  <circle cx="11" cy="11" r="1.5" fill="#e0e0e0" stroke="none"/>
+  <circle cx="16" cy="11" r="1.5" fill="#e0e0e0" stroke="none"/>
+  <circle cx="21" cy="11" r="1.5" fill="#e0e0e0" stroke="none"/>
+  <!-- Prompt symbol -->
+  <path d="M11 22l3 3-3 3"/>
+  <line x1="17" y1="28" x2="25" y2="28"/>
+  <!-- Clock overlay -->
+  <circle cx="36" cy="32" r="10" fill="#1a1a2e" stroke="#e6a817"/>
+  <path d="M36 26v6l4 2" stroke="#e6a817"/>
+</svg>

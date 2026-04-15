@@ -1,0 +1,5 @@
+---
+type:       viewmodule
+interface:  python
+name:       history-config
+script:     main.py

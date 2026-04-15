@@ -16,6 +16,16 @@ let
       mkdir -p $out/lib/calamares/modules/nails-os
       cp -r modules/nails-os/. $out/lib/calamares/modules/nails-os/
 
+      # Custom viewmodules  →  $out/lib/calamares/modules/<name>/
+      mkdir -p $out/lib/calamares/modules/tor-config
+      cp -r modules/tor-config/. $out/lib/calamares/modules/tor-config/
+
+      mkdir -p $out/lib/calamares/modules/history-config
+      cp -r modules/history-config/. $out/lib/calamares/modules/history-config/
+
+      mkdir -p $out/lib/calamares/modules/home-persistence-config
+      cp -r modules/home-persistence-config/. $out/lib/calamares/modules/home-persistence-config/
+
       # Branding  →  $out/share/calamares/branding/nails-os/
       mkdir -p $out/share/calamares/branding/nails-os
       cp -r branding/nails-os/. $out/share/calamares/branding/nails-os/
@@ -39,6 +49,48 @@ let
       runHook postInstall
     '';
   };
+
+  # Upstream Calamares extensions — needed in the launcher to set XDG_CONFIG_DIRS.
+  upstExt = pkgs.calamares-nixos-extensions;
+
+  # Launcher script: detects EFI vs BIOS boot mode and copies the correct
+  # partition.conf into a tmpfs config dir before handing off to Calamares.
+  # XDG_CONFIG_DIRS is set explicitly so Calamares finds our settings.conf
+  # and the mode-appropriate partition.conf.
+  calamaresLauncher = pkgs.writeShellScript "calamares-launch" ''
+    uid=$(id -u)
+    runtime_dir="/run/user/$uid"
+    wayland_sock="''${WAYLAND_DISPLAY:-wayland-0}"
+    chmod o+x "$runtime_dir" 2>/dev/null || true
+
+    # Build a writable config directory in tmpfs so we can inject the correct
+    # partition.conf for this boot mode.  Calamares searches XDG_CONFIG_DIRS
+    # for calamares/settings.conf and calamares/modules/*.conf.
+    cfg_dir="/run/calamares-cfg-$$"
+    mkdir -p "$cfg_dir/calamares/modules"
+    cp ${nailsCalamaresExtensions}/etc/calamares/settings.conf \
+       "$cfg_dir/calamares/"
+    cp ${nailsCalamaresExtensions}/etc/calamares/modules/*.conf \
+       "$cfg_dir/calamares/modules/"
+
+    # Select partition layout based on boot mode.
+    # /sys/firmware/efi is present only when booted via UEFI firmware.
+    if [ -d /sys/firmware/efi ]; then
+      cp ${nailsCalamaresExtensions}/etc/calamares/modules/partition-efi.conf \
+         "$cfg_dir/calamares/modules/partition.conf"
+    else
+      cp ${nailsCalamaresExtensions}/etc/calamares/modules/partition-bios.conf \
+         "$cfg_dir/calamares/modules/partition.conf"
+    fi
+
+    exec sudo \
+      WAYLAND_DISPLAY="$wayland_sock" \
+      XDG_RUNTIME_DIR="$runtime_dir" \
+      XDG_SESSION_TYPE="wayland" \
+      QT_QPA_PLATFORM="wayland" \
+      XDG_CONFIG_DIRS="$cfg_dir:${upstExt}/etc" \
+      calamares
+  '';
 
 in {
   imports = [
@@ -117,7 +169,7 @@ in {
         makeWrapper ${rawBin} $out/bin/calamares \
           --prefix XDG_DATA_DIRS   : "${upstExt}/share" \
           --prefix XDG_DATA_DIRS   : "${ext}/share" \
-          --set    XDG_CONFIG_DIRS   "${ext}/etc:${upstExt}/etc" \
+          --prefix XDG_CONFIG_DIRS : "${ext}/etc" \
           --add-flags "--xdg-config"
       '';
     })
@@ -152,21 +204,7 @@ in {
   environment.etc = {
     "calamares-launch" = {
       mode = "0755";
-      text = ''
-        #!/bin/sh
-        # Calamares launcher — elevate to root while keeping Wayland display.
-        uid=$(id -u)
-        runtime_dir="/run/user/$uid"
-        wayland_sock="''${WAYLAND_DISPLAY:-wayland-0}"
-        # Allow root to traverse the runtime dir so Qt can open the socket.
-        chmod o+x "$runtime_dir" 2>/dev/null || true
-        exec sudo \
-          WAYLAND_DISPLAY="$wayland_sock" \
-          XDG_RUNTIME_DIR="$runtime_dir" \
-          XDG_SESSION_TYPE="wayland" \
-          QT_QPA_PLATFORM="wayland" \
-          calamares
-      '';
+      source = calamaresLauncher;
     };
     "xdg/autostart/calamares.desktop".text = ''
       [Desktop Entry]

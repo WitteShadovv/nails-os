@@ -1,14 +1,20 @@
-# NAILS OS
-
-**An amnesic, anti-forensic operating system. All traffic through Tor. Nothing survives reboot. Built declaratively on NixOS.**
+<div align="center">
+  <img src="nix-config/hosts/nails-os-iso/calamares/branding/nails-os/logo.png" alt="NAILS OS logo" width="160" />
+  <h1>NAILS OS</h1>
 
 [![Build ISO](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml/badge.svg)](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![NixOS 25.11](https://img.shields.io/badge/NixOS-25.11-5277C3.svg?logo=nixos&logoColor=white)](https://nixos.org)
 
-NAILS OS is a live Linux distribution designed for privacy, anonymity, and anti-forensic resistance. It routes all network traffic through Tor, runs entirely from RAM, and leaves no trace on the host machine after shutdown. The desktop environment is **GNOME**. Built declaratively on NixOS for reproducibility and auditability.
+</div>
 
-Designed for journalists, activists, researchers, and anyone who needs to leave no trace on shared or borrowed hardware.
+> **A live NixOS distribution that routes all traffic through Tor and discards the root filesystem on every shutdown.**
+>
+> NAILS OS combines a tmpfs root, transparent Tor proxying, and NixOS's declarative configuration
+> system to provide a privacy-oriented computing environment within the documented threat model.
+> Built for reproducibility and auditability.
+
+---
 
 ## Table of Contents
 
@@ -25,6 +31,7 @@ Designed for journalists, activists, researchers, and anyone who needs to leave 
 - [Repository Setup for CI/CD](#repository-setup-for-cicd)
 - [Cost Tracking & Budget Protection](#cost-tracking--budget-protection)
 - [Repository Structure](#repository-structure)
+- [Security Documentation](#security-documentation)
 - [Contributing](#contributing)
 - [Acknowledgments](#acknowledgments)
 - [License](#license)
@@ -55,6 +62,7 @@ NAILS OS does **not** protect against:
 
 - **Targeted attacks by well-resourced adversaries with physical access** to the running machine (cold boot attacks, hardware implants).
 - **Compromised firmware or BIOS** — NAILS OS runs on commodity hardware and trusts the firmware layer.
+- **Evil maid attacks on BIOS installs** — on BIOS/legacy hardware the `/boot` partition is unencrypted and can be tampered with by an attacker with physical access to the powered-off machine. See [`docs/SECURITY.md`](docs/SECURITY.md).
 - **User error** — if you log into personal accounts over Tor, you deanonymize yourself.
 - **Correlation attacks** — a global passive adversary can correlate Tor entry and exit traffic.
 - **Exit node eavesdropping** — unencrypted traffic leaving the Tor network is visible to the exit relay. Always use HTTPS or end-to-end encryption for sensitive communications.
@@ -68,10 +76,10 @@ No software can substitute for sound operational security practices.
 | Requirement | Details |
 |---|---|
 | Architecture | x86_64 only |
-| Boot | UEFI required (systemd-boot, not GRUB) |
+| Boot | UEFI (systemd-boot) or Legacy BIOS (GRUB 2) |
 | RAM | 4 GB minimum (root filesystem runs entirely from RAM) |
 | USB | 4 GB minimum for the installer ISO |
-| Disk | Any size; fully encrypted (EFI partition + LUKS2 root) |
+| Disk | Any size; fully encrypted. EFI: 1 GiB FAT32 + LUKS2. BIOS: 1 MiB bios_grub + 1 GiB ext4 `/boot` + LUKS2. |
 
 ## Download
 
@@ -136,7 +144,7 @@ gh attestation verify checksums.txt --repo WitteShadovv/nails-os
 6. Review and install.
 7. Reboot into NAILS OS. The system boots into a GNOME desktop.
 
-The installer creates a 1 GiB EFI system partition and a LUKS2-encrypted root partition. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
+The installer detects the boot mode and creates the appropriate layout. On UEFI systems: a 1 GiB FAT32 EFI partition and a LUKS2-encrypted root. On BIOS/legacy systems: a 1 MiB BIOS boot partition, a 1 GiB ext4 `/boot` (unencrypted), and a LUKS2-encrypted root. See [`docs/SECURITY.md`](docs/SECURITY.md) for the security implications of the unencrypted `/boot` on BIOS. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
 
 **Default user:** `amnesia` (UID 1000, member of wheel, networkmanager, video, audio).
 
@@ -246,7 +254,7 @@ nails-os/
       nails-os-iso/            # Installer ISO configuration + Calamares
     modules/                   # Reusable NixOS modules
       base.nix                 # Base system settings
-      boot.nix                 # systemd-boot, initrd, kernel
+      boot.nix                 # bootloader (systemd-boot or GRUB), initrd, kernel
       home.nix                 # Home Manager integration
       storage.nix              # Disk layout, LUKS, mount points
       tor.nix                  # Tor transparent proxy + bridges + nftables
@@ -261,6 +269,11 @@ nails-os/
   LICENSE
 ```
 
+## Security Documentation
+
+- Public vulnerability policy: [`SECURITY.md`](SECURITY.md)
+- Security operations hub (SBOM, dependency hygiene, vulnerability workflow): [`docs/security/index.md`](docs/security/index.md)
+
 ## Contributing
 
 The project uses pre-commit hooks for code quality:
@@ -269,7 +282,9 @@ The project uses pre-commit hooks for code quality:
 pre-commit install
 ```
 
-Hooks include: `nixfmt` (formatting), `deadnix` (dead code), `statix` (linting), `nix-instantiate --parse` (syntax), `nix-flake-update` (automatically updates `flake.lock` on every commit), `detect-secrets`, standard checks (trailing whitespace, YAML/JSON validation, merge conflict detection), and a full NixOS configuration evaluation.
+Hooks include: `nixfmt` (formatting), `deadnix` (dead code), `statix` (linting), `nix-instantiate --parse` (syntax), `detect-secrets`, standard checks (trailing whitespace, YAML/JSON validation, merge conflict detection), and a full NixOS configuration evaluation.
+
+Dependency updates are intentional and maintainer-reviewed. Follow the policy in [`docs/security/dependency-hygiene.md`](docs/security/dependency-hygiene.md).
 
 To test changes locally:
 
@@ -282,6 +297,9 @@ nix build ./nix-config#nails-os-iso
 
 # Test in QEMU (no USB needed)
 qemu-system-x86_64 -enable-kvm -m 4096 -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom result/iso/*.iso
+
+# Test BIOS/Legacy mode install
+qemu-system-x86_64 -enable-kvm -m 4096 -cdrom result/iso/*.iso
 ```
 
 ## Acknowledgments

@@ -4,18 +4,25 @@ import QtQuick.Layouts 1.15
 import io.calamares.core 1.0
 
 Page {
-    id: torConfigPage
+    id: historyConfigPage
 
-    property bool torEnabled: true
+    property bool historyEnabled: false
 
-    onTorEnabledChanged: {
+    Binding {
+        target: historyConfigPage
+        property: "historyEnabled"
+        value: historyConfigPage.historyEnabled
+        when: true
+    }
+
+    onHistoryEnabledChanged: {
         if (typeof calamaresWidget !== "undefined" && calamaresWidget !== null) {
-            calamaresWidget.set_tor_enabled(torEnabled);
+            calamaresWidget.set_history_enabled(historyEnabled);
         }
     }
 
     Component.onCompleted: {
-        torEnabled = true;
+        historyEnabled = false;
     }
 
     Rectangle {
@@ -34,7 +41,7 @@ Page {
         // Header
         Text {
             Layout.fillWidth: true
-            text: qsTr("Network Routing")
+            text: qsTr("Shell History")
             font.pixelSize: 24
             font.bold: true
             color: "#ffffff"
@@ -42,7 +49,7 @@ Page {
 
         Text {
             Layout.fillWidth: true
-            text: qsTr("Choose how this system connects to the internet:")
+            text: qsTr("Choose whether your terminal commands are saved between sessions:")
             font.pixelSize: 14
             color: "#aaaacc"
             wrapMode: Text.WordWrap
@@ -51,21 +58,21 @@ Page {
         Item { height: 8 }
 
         ButtonGroup {
-            id: routingGroup
+            id: historyGroup
         }
 
-        // --- Tor routing (default/recommended) ---
+        // --- Disabled option (default/recommended) ---
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: torColumn.implicitHeight + 24
-            color: torRadio.checked ? "#2a2a4e" : "#222244"
-            border.color: torRadio.checked ? "#7f5af0" : "#444466"
-            border.width: torRadio.checked ? 2 : 1
+            Layout.preferredHeight: disabledColumn.implicitHeight + 24
+            color: disabledRadio.checked ? "#2a2a4e" : "#222244"
+            border.color: disabledRadio.checked ? "#7f5af0" : "#444466"
+            border.width: disabledRadio.checked ? 2 : 1
             radius: 8
 
             MouseArea {
                 anchors.fill: parent
-                onClicked: torRadio.checked = true
+                onClicked: disabledRadio.checked = true
                 cursorShape: Qt.PointingHandCursor
             }
 
@@ -81,13 +88,13 @@ Page {
                     Layout.preferredWidth: 48
                     Layout.preferredHeight: 48
                     Layout.alignment: Qt.AlignTop
-                    source: "../branding/nails-os/icons/tor-onion.svg"
+                    source: "../branding/nails-os/icons/history-disabled.svg"
                     fillMode: Image.PreserveAspectFit
                     smooth: true
                 }
 
                 ColumnLayout {
-                    id: torColumn
+                    id: disabledColumn
                     Layout.fillWidth: true
                     spacing: 8
 
@@ -95,18 +102,18 @@ Page {
                         spacing: 8
 
                         RadioButton {
-                            id: torRadio
+                            id: disabledRadio
                             checked: true
-                            ButtonGroup.group: routingGroup
+                            ButtonGroup.group: historyGroup
                             onCheckedChanged: {
                                 if (checked) {
-                                    torEnabled = true;
+                                    historyEnabled = false;
                                 }
                             }
                         }
 
                         Text {
-                            text: qsTr("Route through Tor")
+                            text: qsTr("Disable shell history")
                             font.pixelSize: 16
                             font.bold: true
                             color: "#e0e0e0"
@@ -131,63 +138,14 @@ Page {
 
                     Text {
                         Layout.fillWidth: true
-                        text: qsTr("All network traffic is transparently routed through the Tor anonymity network. DNS queries are resolved through Tor. This is the most private option.")
+                        text: qsTr("Commands you type in the terminal leave no trace after your session ends. Your command history is never saved to disk.")
                         font.pixelSize: 13
                         color: "#aaaacc"
                         wrapMode: Text.WordWrap
                     }
 
-                    // Features list
-                    RowLayout {
-                        Layout.topMargin: 4
-                        spacing: 16
-
-                        RowLayout {
-                            spacing: 4
-                            Text {
-                                text: "✓"
-                                font.pixelSize: 12
-                                color: "#2cb67d"
-                            }
-                            Text {
-                                text: qsTr("IP hidden")
-                                font.pixelSize: 11
-                                color: "#aaaacc"
-                            }
-                        }
-
-                        RowLayout {
-                            spacing: 4
-                            Text {
-                                text: "✓"
-                                font.pixelSize: 12
-                                color: "#2cb67d"
-                            }
-                            Text {
-                                text: qsTr("DNS encrypted")
-                                font.pixelSize: 11
-                                color: "#aaaacc"
-                            }
-                        }
-
-                        RowLayout {
-                            spacing: 4
-                            Text {
-                                text: "✓"
-                                font.pixelSize: 12
-                                color: "#2cb67d"
-                            }
-                            Text {
-                                text: qsTr("ISP blind")
-                                font.pixelSize: 11
-                                color: "#aaaacc"
-                            }
-                        }
-                    }
-
                     // Privacy indicator
                     RowLayout {
-                        Layout.topMargin: 4
                         spacing: 6
                         Text {
                             text: qsTr("Privacy:")
@@ -216,18 +174,18 @@ Page {
             }
         }
 
-        // --- Direct / cleartext ---
+        // --- Enabled option ---
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: directColumn.implicitHeight + 24
-            color: directRadio.checked ? "#2a2a4e" : "#222244"
-            border.color: directRadio.checked ? "#e6a817" : "#444466"
-            border.width: directRadio.checked ? 2 : 1
+            Layout.preferredHeight: enabledColumn.implicitHeight + 24
+            color: enabledRadio.checked ? "#2a2a4e" : "#222244"
+            border.color: enabledRadio.checked ? "#e6a817" : "#444466"
+            border.width: enabledRadio.checked ? 2 : 1
             radius: 8
 
             MouseArea {
                 anchors.fill: parent
-                onClicked: directRadio.checked = true
+                onClicked: enabledRadio.checked = true
                 cursorShape: Qt.PointingHandCursor
             }
 
@@ -243,13 +201,13 @@ Page {
                     Layout.preferredWidth: 48
                     Layout.preferredHeight: 48
                     Layout.alignment: Qt.AlignTop
-                    source: "../branding/nails-os/icons/direct-globe.svg"
+                    source: "../branding/nails-os/icons/history-enabled.svg"
                     fillMode: Image.PreserveAspectFit
                     smooth: true
                 }
 
                 ColumnLayout {
-                    id: directColumn
+                    id: enabledColumn
                     Layout.fillWidth: true
                     spacing: 8
 
@@ -257,18 +215,18 @@ Page {
                         spacing: 8
 
                         RadioButton {
-                            id: directRadio
+                            id: enabledRadio
                             checked: false
-                            ButtonGroup.group: routingGroup
+                            ButtonGroup.group: historyGroup
                             onCheckedChanged: {
                                 if (checked) {
-                                    torEnabled = false;
+                                    historyEnabled = true;
                                 }
                             }
                         }
 
                         Text {
-                            text: qsTr("Direct connection")
+                            text: qsTr("Enable shell history")
                             font.pixelSize: 16
                             font.bold: true
                             color: "#e0e0e0"
@@ -277,63 +235,15 @@ Page {
 
                     Text {
                         Layout.fillWidth: true
-                        text: qsTr("Traffic goes directly to the internet without Tor. DNS is handled by Quad9 (9.9.9.9). Faster speeds, but reduced privacy.")
+                        text: qsTr("Shell commands are saved to history files (~/.bash_history, etc.). Convenient for recalling previous commands with the up arrow.")
                         font.pixelSize: 13
                         color: "#aaaacc"
                         wrapMode: Text.WordWrap
                     }
 
-                    // Features list
-                    RowLayout {
-                        Layout.topMargin: 4
-                        spacing: 16
-
-                        RowLayout {
-                            spacing: 4
-                            Text {
-                                text: "✗"
-                                font.pixelSize: 12
-                                color: "#e6a817"
-                            }
-                            Text {
-                                text: qsTr("IP exposed")
-                                font.pixelSize: 11
-                                color: "#aaaacc"
-                            }
-                        }
-
-                        RowLayout {
-                            spacing: 4
-                            Text {
-                                text: "✓"
-                                font.pixelSize: 12
-                                color: "#2cb67d"
-                            }
-                            Text {
-                                text: qsTr("Faster speeds")
-                                font.pixelSize: 11
-                                color: "#aaaacc"
-                            }
-                        }
-
-                        RowLayout {
-                            spacing: 4
-                            Text {
-                                text: "✗"
-                                font.pixelSize: 12
-                                color: "#e6a817"
-                            }
-                            Text {
-                                text: qsTr("ISP can see")
-                                font.pixelSize: 11
-                                color: "#aaaacc"
-                            }
-                        }
-                    }
-
                     // Warning when selected
                     Rectangle {
-                        visible: directRadio.checked
+                        visible: enabledRadio.checked
                         Layout.fillWidth: true
                         Layout.topMargin: 4
                         Layout.preferredHeight: warningText.implicitHeight + 12
@@ -348,7 +258,7 @@ Page {
                                 fill: parent
                                 margins: 8
                             }
-                            text: qsTr("Your real IP address will be visible to websites and your ISP can see which sites you connect to.")
+                            text: qsTr("Creates a persistent record of your terminal activity that could be recovered forensically.")
                             font.pixelSize: 12
                             color: "#e6a817"
                             wrapMode: Text.WordWrap
@@ -357,7 +267,6 @@ Page {
 
                     // Privacy indicator
                     RowLayout {
-                        Layout.topMargin: 4
                         spacing: 6
                         Text {
                             text: qsTr("Privacy:")

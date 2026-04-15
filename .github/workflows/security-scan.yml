@@ -1,0 +1,93 @@
+name: Weekly Security Scan
+
+on:
+  schedule:
+    # Weekly Monday ~06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vuln-scan:
+    name: Vulnerability Scan (vulnix)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v17
+
+      - name: Run vulnerability scan
+        id: scan
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          TARGET=$(nix path-info ./nix-config#nixosConfigurations.nails-os-iso.config.system.build.toplevel)
+          REPORT="dist/vulnix-results.json"
+
+          nix run ./nix-config#vulnix-scan -- "$TARGET" "$REPORT"
+
+          TOTAL=$(jq 'length' "$REPORT")
+          CRITICAL=$(jq '[.[] | select((.cvssv3_basescore // 0) >= 9.0)] | length' "$REPORT")
+          HIGH=$(jq '[.[] | select((.cvssv3_basescore // 0) >= 7.0 and (.cvssv3_basescore // 0) < 9.0)] | length' "$REPORT")
+          SCORED=$(jq '[.[] | select((.cvssv3_basescore? | type) == "number")] | length' "$REPORT")
+
+          SUMMARY="total=${TOTAL}, critical=${CRITICAL}, high=${HIGH}, scored=${SCORED}"
+          echo "summary=${SUMMARY}" >> "$GITHUB_OUTPUT"
+          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "critical=${CRITICAL}" >> "$GITHUB_OUTPUT"
+          echo "high=${HIGH}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload vulnerability report artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: nails-os-weekly-vuln-scan-${{ github.run_id }}
+          path: dist/vulnix-results.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Open issue for critical findings
+        if: steps.scan.outputs.critical != '0' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUMMARY: ${{ steps.scan.outputs.summary }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          TITLE="🚨 Weekly security scan: critical vulnerabilities detected"
+          SEARCH='is:issue is:open in:title "Weekly security scan: critical vulnerabilities detected" label:security'
+
+          if gh issue list --repo "$REPO" --search "$SEARCH" --json number --jq 'length > 0' | grep -q true; then
+            echo "::notice::An open weekly critical vulnerability issue already exists; skipping issue creation."
+            exit 0
+          fi
+
+          gh issue create \
+            --repo "$REPO" \
+            --title "$TITLE" \
+            --body "Automated weekly security scan detected critical findings.\n\nSummary: \\`$SUMMARY\\`\n\nRun details: $RUN_URL\n\nPlease triage and patch or document exceptions."
+
+      - name: Summarize security scan
+        if: always()
+        run: |
+          printf '## Weekly Security Scan Summary\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Metric | Value |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Findings summary | `%s` |\n' "${{ steps.scan.outputs.summary || 'unavailable' }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Artifact | `dist/vulnix-results.json` (retention 90 days) |\n' >> "$GITHUB_STEP_SUMMARY"

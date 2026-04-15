@@ -93,6 +93,21 @@ on:
       build_metadata_content:
         description: "Base64-encoded content of dist/build-metadata.json"
         value: ${{ jobs.build-and-verify.outputs.build_metadata_content }}
+      r2_sbom_name:
+        description: "SBOM filename uploaded to R2"
+        value: ${{ jobs.build-and-verify.outputs.r2_sbom_name }}
+      r2_vuln_report_name:
+        description: "Vulnerability report filename uploaded to R2"
+        value: ${{ jobs.build-and-verify.outputs.r2_vuln_report_name }}
+      r2_sbom_uploaded:
+        description: "Whether the SBOM was uploaded to R2"
+        value: ${{ jobs.build-and-verify.outputs.r2_sbom_uploaded }}
+      r2_vuln_uploaded:
+        description: "Whether the vulnerability report was uploaded to R2"
+        value: ${{ jobs.build-and-verify.outputs.r2_vuln_uploaded }}
+      vulnerability_summary:
+        description: "Human-readable vulnerability summary"
+        value: ${{ jobs.build-and-verify.outputs.vulnerability_summary }}
 
 permissions:
   contents: read
@@ -716,6 +731,11 @@ jobs:
       r2_uploaded: ${{ steps.r2-upload.outputs.r2_uploaded || 'false' }}
       checksums_content: ${{ steps.capture-metadata.outputs.checksums_content_b64 }}
       build_metadata_content: ${{ steps.capture-metadata.outputs.build_metadata_content_b64 }}
+      r2_sbom_name: ${{ steps.r2-upload.outputs.sbom_name || '' }}
+      r2_vuln_report_name: ${{ steps.r2-upload.outputs.vuln_report_name || '' }}
+      r2_sbom_uploaded: ${{ steps.r2-upload.outputs.sbom_uploaded || 'false' }}
+      r2_vuln_uploaded: ${{ steps.r2-upload.outputs.vuln_uploaded || 'false' }}
+      vulnerability_summary: ${{ steps.vuln-policy.outputs.summary || 'not-run' }}
     steps:
       # -----------------------------------------------------------------------
       # Install host dependencies
@@ -1071,6 +1091,117 @@ jobs:
           cat dist/build-metadata.json
 
       # -----------------------------------------------------------------------
+      # Generate SBOM from the project-defined Nix output (no ad-hoc scripts).
+      # This runs after build metadata exists so both artifacts can be correlated.
+      # -----------------------------------------------------------------------
+      - name: Generate CycloneDX SBOM
+        id: sbom
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          nix build ./nix-config#sbom -L
+
+          SBOM_FILE="dist/nails-os-sbom.cdx.json"
+          if [ ! -f result/sbom.cdx.json ]; then
+            echo "::error::Expected SBOM at result/sbom.cdx.json but it was not found"
+            ls -la result || true
+            exit 1
+          fi
+          cp result/sbom.cdx.json "$SBOM_FILE"
+
+          echo "sbom_file=$SBOM_FILE" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Validate CycloneDX SBOM structure. Prefer lightweight JSON/schema sanity
+      # checks in CI to avoid heavy toolchain overhead on every build.
+      # -----------------------------------------------------------------------
+      - name: Validate SBOM structure
+        id: sbom-validate
+        run: |
+          set -euo pipefail
+          SBOM_FILE="${{ steps.sbom.outputs.sbom_file }}"
+
+          jq -e '
+            .bomFormat == "CycloneDX" and
+            (.specVersion | type == "string") and
+            (.metadata | type == "object") and
+            (.components | type == "array") and
+            (.version | type == "number")
+          ' "$SBOM_FILE" >/dev/null
+
+          COMPONENT_COUNT=$(jq '.components | length' "$SBOM_FILE")
+          if [ "$COMPONENT_COUNT" -le 0 ]; then
+            echo "::error::SBOM has zero components"
+            exit 1
+          fi
+
+          echo "component_count=$COMPONENT_COUNT" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Run vulnerability scan using the project-defined Nix app.
+      # Policy: fail only on critical findings when CVSS scoring coverage is
+      # sufficiently reliable; otherwise warn and keep report as artifact.
+      # -----------------------------------------------------------------------
+      - name: Run vulnerability scan (vulnix)
+        id: vulnix-scan
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          TARGET=$(nix path-info ./nix-config#nixosConfigurations.nails-os-iso.config.system.build.toplevel)
+          OUTPUT="dist/vulnix-results.json"
+
+          nix run ./nix-config#vulnix-scan -- "$TARGET" "$OUTPUT" | tee /tmp/vulnix-summary.log
+
+          echo "report_file=$OUTPUT" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce vulnerability policy
+        id: vuln-policy
+        run: |
+          set -euo pipefail
+          REPORT="${{ steps.vulnix-scan.outputs.report_file }}"
+
+          TOTAL=$(jq 'length' "$REPORT")
+          CRITICAL=$(jq '[.[] | select((.cvssv3_basescore // 0) >= 9.0)] | length' "$REPORT")
+          HIGH=$(jq '[.[] | select((.cvssv3_basescore // 0) >= 7.0 and (.cvssv3_basescore // 0) < 9.0)] | length' "$REPORT")
+          SCORED=$(jq '[.[] | select((.cvssv3_basescore? | type) == "number")] | length' "$REPORT")
+
+          RELIABLE=false
+          if [ "$TOTAL" -eq 0 ]; then
+            RELIABLE=true
+          elif [ "$SCORED" -gt 0 ] && awk "BEGIN {exit !(($SCORED/$TOTAL) >= 0.8)}"; then
+            RELIABLE=true
+          fi
+
+          SUMMARY="total=${TOTAL}, critical=${CRITICAL}, high=${HIGH}, scored=${SCORED}, reliable=${RELIABLE}"
+          echo "summary=${SUMMARY}" >> "$GITHUB_OUTPUT"
+          echo "critical_count=${CRITICAL}" >> "$GITHUB_OUTPUT"
+
+          if [ "$CRITICAL" -gt 0 ] && [ "$RELIABLE" = "true" ]; then
+            echo "::error::Critical vulnerabilities found with reliable CVSS signal (${SUMMARY})"
+            exit 1
+          fi
+
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::warning::Critical vulnerabilities detected, but CVSS signal is not reliable enough to hard-fail (${SUMMARY})."
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "::warning::High-severity vulnerabilities detected (${SUMMARY})."
+          else
+            echo "No high/critical vulnerabilities detected (${SUMMARY})."
+          fi
+
+      - name: Upload SBOM and vulnerability artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: nails-os-security-${{ github.sha }}
+          path: |
+            dist/nails-os-sbom.cdx.json
+            dist/vulnix-results.json
+          retention-days: 90
+          if-no-files-found: error
+
+      # -----------------------------------------------------------------------
       # Capture checksums.txt and build-metadata.json contents as step outputs
       # so they can be passed through workflow_call outputs to release.yml,
       # eliminating the need for release.yml to download a GitHub artifact.
@@ -1130,11 +1261,41 @@ jobs:
           aws s3 cp "$ISO_FILE" "s3://${R2_BUCKET}/${R2_PREFIX}/${ISO_NAME}" \
             --endpoint-url "${R2_ENDPOINT}" \
             --no-progress
+
+          SBOM_FILE="dist/nails-os-sbom.cdx.json"
+          SBOM_NAME=""
+          SBOM_UPLOADED="false"
+          if [ -f "$SBOM_FILE" ]; then
+            SBOM_NAME=$(basename "$SBOM_FILE")
+            aws s3 cp "$SBOM_FILE" "s3://${R2_BUCKET}/${R2_PREFIX}/security/${SBOM_NAME}" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --no-progress
+            SBOM_UPLOADED="true"
+          else
+            echo "::warning::SBOM file not found, skipping R2 SBOM upload"
+          fi
+
+          VULN_FILE="dist/vulnix-results.json"
+          VULN_NAME=""
+          VULN_UPLOADED="false"
+          if [ -f "$VULN_FILE" ]; then
+            VULN_NAME=$(basename "$VULN_FILE")
+            aws s3 cp "$VULN_FILE" "s3://${R2_BUCKET}/${R2_PREFIX}/security/${VULN_NAME}" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --no-progress
+            VULN_UPLOADED="true"
+          else
+            echo "::warning::Vulnerability report not found, skipping R2 vulnerability upload"
+          fi
           echo "::endgroup::"
 
           echo "iso_name=${ISO_NAME}" >> "$GITHUB_OUTPUT"
           echo "r2_prefix=${R2_PREFIX}" >> "$GITHUB_OUTPUT"
           echo "r2_uploaded=true" >> "$GITHUB_OUTPUT"
+          echo "sbom_name=${SBOM_NAME}" >> "$GITHUB_OUTPUT"
+          echo "sbom_uploaded=${SBOM_UPLOADED}" >> "$GITHUB_OUTPUT"
+          echo "vuln_report_name=${VULN_NAME}" >> "$GITHUB_OUTPUT"
+          echo "vuln_uploaded=${VULN_UPLOADED}" >> "$GITHUB_OUTPUT"
           echo "Uploaded ${ISO_NAME} to R2 ${R2_PREFIX}/"
 
       # -----------------------------------------------------------------------
@@ -1370,9 +1531,14 @@ jobs:
           printf '| **Server** | %s @ %s |\n' "${{ needs.create-runner.outputs.server_type }}" "${{ needs.create-runner.outputs.location }}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **L1 (same-store)** | %s %s |\n' "${L1_ICON}" "${L1_RESULT:-not run}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **L2 (full rebuild)** | %s %s |\n' "${L2_ICON}" "${L2_RESULT:-not run}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **SBOM components** | %s |\n' "${{ steps.sbom-validate.outputs.component_count || 'n/a' }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '| **Vulnerability scan** | `%s` |\n' "${{ steps.vuln-policy.outputs.summary || 'not-run' }}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **Commit** | `%s` |\n' "${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **Ref** | `%s` |\n' "${{ github.ref_name }}" >> "$GITHUB_STEP_SUMMARY"
           printf '| **Session cost** | ~€%s (%sh) |\n' "${{ steps.session-cost.outputs.session_cost_eur }}" "${{ steps.session-cost.outputs.session_hours }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n### Security artifacts\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- SBOM: `dist/nails-os-sbom.cdx.json` (uploaded to artifact store, 90-day retention)\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Vulnerability report: `dist/vulnix-results.json` (uploaded to artifact store, 90-day retention)\n' >> "$GITHUB_STEP_SUMMARY"
 
   # ===========================================================================
   # Job 3: Destroy the Hetzner Cloud server

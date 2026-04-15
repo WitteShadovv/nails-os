@@ -94,6 +94,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       # -----------------------------------------------------------------------
@@ -137,6 +138,61 @@ jobs:
           echo ""
           echo "--- build-metadata.json ---"
           cat dist/build-metadata.json
+
+      # -----------------------------------------------------------------------
+      # 2b. Fetch security artifacts from R2 when available.
+      # If not available, generate a pointer manifest to keep release flow robust.
+      # -----------------------------------------------------------------------
+      - name: Fetch security artifacts from R2 (best effort)
+        env:
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+          R2_SBOM_NAME: ${{ needs.build.outputs.r2_sbom_name }}
+          R2_VULN_REPORT_NAME: ${{ needs.build.outputs.r2_vuln_report_name }}
+          R2_SBOM_UPLOADED: ${{ needs.build.outputs.r2_sbom_uploaded }}
+          R2_VULN_UPLOADED: ${{ needs.build.outputs.r2_vuln_uploaded }}
+          VULN_SUMMARY: ${{ needs.build.outputs.vulnerability_summary }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          SBOM_LOCAL=""
+          VULN_LOCAL=""
+
+          if [ -n "${R2_PUBLIC_URL:-}" ] && [ "${R2_SBOM_UPLOADED:-false}" = "true" ] && [ -n "${R2_SBOM_NAME:-}" ]; then
+            if curl -fsSL "${R2_PUBLIC_URL}/stable/security/${R2_SBOM_NAME}" -o "dist/${R2_SBOM_NAME}"; then
+              SBOM_LOCAL="dist/${R2_SBOM_NAME}"
+            else
+              echo "::warning::Failed to download SBOM from R2"
+            fi
+          fi
+
+          if [ -n "${R2_PUBLIC_URL:-}" ] && [ "${R2_VULN_UPLOADED:-false}" = "true" ] && [ -n "${R2_VULN_REPORT_NAME:-}" ]; then
+            if curl -fsSL "${R2_PUBLIC_URL}/stable/security/${R2_VULN_REPORT_NAME}" -o "dist/${R2_VULN_REPORT_NAME}"; then
+              VULN_LOCAL="dist/${R2_VULN_REPORT_NAME}"
+            else
+              echo "::warning::Failed to download vulnerability report from R2"
+            fi
+          fi
+
+          {
+            echo "Security artifact references"
+            echo "============================"
+            echo "Vulnerability summary: ${VULN_SUMMARY:-unknown}"
+            echo ""
+            if [ -n "${R2_PUBLIC_URL:-}" ] && [ -n "${R2_SBOM_NAME:-}" ]; then
+              echo "SBOM URL: ${R2_PUBLIC_URL}/stable/security/${R2_SBOM_NAME}"
+            else
+              echo "SBOM URL: unavailable"
+            fi
+            if [ -n "${R2_PUBLIC_URL:-}" ] && [ -n "${R2_VULN_REPORT_NAME:-}" ]; then
+              echo "Vulnerability report URL: ${R2_PUBLIC_URL}/stable/security/${R2_VULN_REPORT_NAME}"
+            else
+              echo "Vulnerability report URL: unavailable"
+            fi
+          } > dist/security-artifacts.txt
+
+          echo "sbom_local=${SBOM_LOCAL}" >> "$GITHUB_OUTPUT"
+          echo "vuln_local=${VULN_LOCAL}" >> "$GITHUB_OUTPUT"
 
       # -----------------------------------------------------------------------
       # 3. Determine release metadata from trigger context
@@ -218,6 +274,140 @@ jobs:
           echo "::notice::Release ${RELEASE_NAME} (${TAG}) — prerelease=${PRERELEASE}, reproducible=${REPRODUCIBLE}"
 
       # -----------------------------------------------------------------------
+      # 3b. Compute dependency diff from flake.lock between previous and current
+      # tag. Gracefully handles first-release/no-previous-tag scenarios.
+      # -----------------------------------------------------------------------
+      - name: Generate dependency diff (flake.lock)
+        id: depdiff
+        env:
+          CURRENT_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git fetch --force --tags
+
+          python3 - << 'PYEOF'
+          import json
+          import os
+          import subprocess
+
+          current_tag = os.environ["CURRENT_TAG"]
+
+          def run(*args):
+              return subprocess.check_output(args, text=True).strip()
+
+          try:
+              tags = run("git", "tag", "--list", "v*", "--sort=-creatordate").splitlines()
+          except subprocess.CalledProcessError:
+              tags = []
+
+          prev_tag = ""
+          for t in tags:
+              if t and t != current_tag:
+                  prev_tag = t
+                  break
+
+          def load_lock_from_git(ref):
+              try:
+                  content = run("git", "show", f"{ref}:nix-config/flake.lock")
+                  return json.loads(content)
+              except Exception:
+                  return None
+
+          def load_current_lock():
+              try:
+                  with open("nix-config/flake.lock", "r", encoding="utf-8") as f:
+                      return json.load(f)
+              except Exception:
+                  return None
+
+          def normalize(lock):
+              out = {}
+              if not lock:
+                  return out
+              for name, node in (lock.get("nodes") or {}).items():
+                  locked = node.get("locked") or {}
+                  original = node.get("original") or {}
+                  if not locked:
+                      continue
+                  ref = locked.get("rev") or locked.get("narHash") or str(locked.get("lastModified", "unknown"))
+                  source = "/".join(
+                      p for p in [
+                          original.get("type"),
+                          original.get("owner"),
+                          original.get("repo"),
+                      ]
+                      if p
+                  ) or "unknown"
+                  out[name] = {"ref": ref, "source": source}
+              return out
+
+          current = normalize(load_current_lock())
+          if not prev_tag:
+              section = "### Dependency Diff\n\n- No previous `v*` tag found (first release).\n"
+          else:
+              previous = normalize(load_lock_from_git(prev_tag))
+              if not previous:
+                  section = f"### Dependency Diff\n\n- Could not read `nix-config/flake.lock` from `{prev_tag}`.\n"
+              else:
+                  added = sorted(set(current) - set(previous))
+                  removed = sorted(set(previous) - set(current))
+                  changed = sorted(
+                      n for n in (set(current) & set(previous))
+                      if current[n]["ref"] != previous[n]["ref"]
+                  )
+
+                  lines = [
+                      "### Dependency Diff",
+                      "",
+                      f"Compared `flake.lock` between `{prev_tag}` and `{current_tag}`.",
+                      "",
+                      f"- Added inputs: {len(added)}",
+                      f"- Removed inputs: {len(removed)}",
+                      f"- Updated inputs: {len(changed)}",
+                      "",
+                  ]
+
+                  if changed:
+                      lines.append("#### Updated inputs")
+                      for name in changed[:30]:
+                          lines.append(
+                              f"- `{name}`: `{previous[name]['ref']}` → `{current[name]['ref']}`"
+                          )
+                      if len(changed) > 30:
+                          lines.append(f"- _... and {len(changed) - 30} more updates_")
+                      lines.append("")
+
+                  if added:
+                      lines.append("#### Added inputs")
+                      for name in added[:20]:
+                          lines.append(f"- `{name}` ({current[name]['source']})")
+                      if len(added) > 20:
+                          lines.append(f"- _... and {len(added) - 20} more additions_")
+                      lines.append("")
+
+                  if removed:
+                      lines.append("#### Removed inputs")
+                      for name in removed[:20]:
+                          lines.append(f"- `{name}` ({previous[name]['source']})")
+                      if len(removed) > 20:
+                          lines.append(f"- _... and {len(removed) - 20} more removals_")
+                      lines.append("")
+
+                  section = "\n".join(lines)
+
+          with open("dist/dependency-diff.md", "w", encoding="utf-8") as f:
+              f.write(section)
+          print(section)
+          PYEOF
+
+          {
+            echo "section<<EOF"
+            cat dist/dependency-diff.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
       # 4. Check repository visibility
       # -----------------------------------------------------------------------
       - name: Check repository visibility
@@ -279,6 +469,12 @@ jobs:
           R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
           R2_ISO_NAME: ${{ needs.build.outputs.r2_iso_name }}
           R2_UPLOADED: ${{ needs.build.outputs.r2_uploaded }}
+          R2_SBOM_NAME: ${{ needs.build.outputs.r2_sbom_name }}
+          R2_VULN_REPORT_NAME: ${{ needs.build.outputs.r2_vuln_report_name }}
+          R2_SBOM_UPLOADED: ${{ needs.build.outputs.r2_sbom_uploaded }}
+          R2_VULN_UPLOADED: ${{ needs.build.outputs.r2_vuln_uploaded }}
+          VULN_SUMMARY: ${{ needs.build.outputs.vulnerability_summary }}
+          DEPENDENCY_DIFF_SECTION: ${{ steps.depdiff.outputs.section }}
         run: |
           python3 - << 'PYEOF'
           import json, os
@@ -296,6 +492,12 @@ jobs:
           r2_public_url = os.environ.get("R2_PUBLIC_URL", "")
           r2_iso_name = os.environ.get("R2_ISO_NAME", "")
           r2_uploaded = os.environ.get("R2_UPLOADED", "false")
+          r2_sbom_name = os.environ.get("R2_SBOM_NAME", "")
+          r2_vuln_name = os.environ.get("R2_VULN_REPORT_NAME", "")
+          r2_sbom_uploaded = os.environ.get("R2_SBOM_UPLOADED", "false")
+          r2_vuln_uploaded = os.environ.get("R2_VULN_UPLOADED", "false")
+          vuln_summary = os.environ.get("VULN_SUMMARY", "unknown")
+          dep_diff_section = os.environ.get("DEPENDENCY_DIFF_SECTION", "### Dependency Diff\n\n- Unavailable.\n")
 
           # Fall back to build-metadata.json for ISO filename if R2 output is missing
           if not r2_iso_name:
@@ -319,6 +521,16 @@ jobs:
               download_link = f"[**Download {r2_iso_name}**]({r2_public_url}/stable/{r2_iso_name})"
           else:
               download_link = "> ISO download hosted externally. Check project page for download links."
+
+          if r2_public_url and r2_sbom_name and r2_sbom_uploaded == "true":
+              sbom_link = f"[SBOM (CycloneDX)]({r2_public_url}/stable/security/{r2_sbom_name})"
+          else:
+              sbom_link = "SBOM reference available in `security-artifacts.txt` asset"
+
+          if r2_public_url and r2_vuln_name and r2_vuln_uploaded == "true":
+              vuln_link = f"[Vulnerability report]({r2_public_url}/stable/security/{r2_vuln_name})"
+          else:
+              vuln_link = "Vulnerability report reference available in `security-artifacts.txt` asset"
 
           if is_public == "true":
               attestation = f"""### Attestation
@@ -371,6 +583,14 @@ jobs:
           | **Nixpkgs revision** | `{nixpkgs_rev}` |
           | **Reproducible** | {repro_status} |
           | **Build date** | {build_date} |
+
+          ### Security Artifacts
+
+          - {sbom_link}
+          - {vuln_link}
+          - Vulnerability summary (build pipeline): `{vuln_summary}`
+
+          {dep_diff_section}
 
           {attestation}
           """
@@ -433,7 +653,13 @@ jobs:
           GH_ARGS+=(
             "dist/checksums.txt"
             "dist/build-metadata.json"
+            "dist/security-artifacts.txt"
+            "dist/dependency-diff.md"
           )
+
+          # Attach local copies of security artifacts when available.
+          [ -f "dist/${{ needs.build.outputs.r2_sbom_name }}" ] && GH_ARGS+=("dist/${{ needs.build.outputs.r2_sbom_name }}")
+          [ -f "dist/${{ needs.build.outputs.r2_vuln_report_name }}" ] && GH_ARGS+=("dist/${{ needs.build.outputs.r2_vuln_report_name }}")
 
           echo "Creating release: gh release create ${GH_ARGS[*]}"
           RELEASE_URL=$(gh release create "${GH_ARGS[@]}")
@@ -473,4 +699,6 @@ jobs:
           printf -- '- ISO hosted on Cloudflare R2\n' >> "$GITHUB_STEP_SUMMARY"
           printf -- '- `checksums.txt`\n' >> "$GITHUB_STEP_SUMMARY"
           printf -- '- `build-metadata.json`\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- `security-artifacts.txt`\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- `dependency-diff.md`\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf '### Release URL\n%s\n' "${RELEASE_URL}" >> "$GITHUB_STEP_SUMMARY"

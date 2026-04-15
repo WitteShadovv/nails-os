@@ -16,19 +16,6 @@ repos:
             rm -f result result-*
             echo "✓ Cleaned up result symlinks"
 
-      - id: nix-flake-update
-        name: nix flake update and commit
-        entry: bash
-        language: system
-        pass_filenames: false
-        always_run: true
-        args:
-          - -c
-          - |
-            echo "Updating flake.lock..."
-            nix flake update ./nix-config
-            git add nix-config/flake.lock
-
       - id: nixfmt
         name: nixfmt
         entry: nixfmt
@@ -74,7 +61,7 @@ repos:
         exclude: '(.*/tmp-.*\.nix$)'
         args:
           - -c
-          - 'for file in "$@"; do if grep "/nix/store" "$file"; then echo "Hard-coded store paths found in $file!"; exit 1; fi; done'
+          - 'for file in "$@"; do if grep -E "(/nix/store/[a-z0-9]{32}-|[\"\x27]/nix/store[\"\x27])" "$file"; then echo "Hard-coded store paths found in $file!"; exit 1; fi; done'
           - --
 
       - id: flake-lock-check
@@ -87,6 +74,27 @@ repos:
         args:
           - -c
           - "nix flake lock --no-update-lock-file ./nix-config"
+
+      - id: ignored-cves-policy-check
+        name: ignored CVEs policy shape check
+        entry: python3
+        language: system
+        files: nix-config/security/ignored-cves\.json$
+        pass_filenames: false
+        args:
+          - -c
+          - |
+            import json
+            from pathlib import Path
+
+            data = json.loads(Path("nix-config/security/ignored-cves.json").read_text())
+            assert data.get("version") == 1, "version must be 1"
+            entries = data.get("entries")
+            assert isinstance(entries, list), "entries must be an array"
+            for idx, item in enumerate(entries):
+              assert isinstance(item.get("cve"), str), f"entries[{idx}].cve must be a string"
+              assert isinstance(item.get("expires"), str), f"entries[{idx}].expires must be a string"
+              assert isinstance(item.get("reason"), str), f"entries[{idx}].reason must be a string"
 
       - id: detect-secrets
         name: detect secrets

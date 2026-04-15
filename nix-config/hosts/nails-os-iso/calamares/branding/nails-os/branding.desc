@@ -10,7 +10,7 @@ welcomeExpandingLogo:  true
 ### WINDOW
 
 windowExpanding:  normal
-windowSize:       800px,520px
+windowSize:       800px,600px
 windowPlacement:  center
 
 ### PANELS
@@ -45,6 +45,8 @@ style:
     SidebarText:              "#e0e0e0"
     SidebarTextCurrent:       "#ffffff"
     SidebarBackgroundCurrent: "#16213e"
+
+stylesheet:   "stylesheet.qss"
 
 ### SLIDESHOW
 

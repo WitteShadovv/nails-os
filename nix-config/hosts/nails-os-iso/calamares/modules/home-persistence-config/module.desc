@@ -1,0 +1,5 @@
+---
+type:       viewmodule
+interface:  python
+name:       home-persistence-config
+script:     main.py
