@@ -822,17 +822,31 @@ def write_user_config(gs, target_nixos, efi_mode):
     )
 
     # ------------------------------------------------------------------
-    # 5c. Write network-mode.nix if user chose to disable Tor
+    # 5c. Write network-mode.nix if user chose to disable Tor, or
+    #     tor-bridges-mode.nix when Tor is enabled so that the bridge
+    #     preference set on the tor-config page reaches the installed config.
     #
-    # The packagechooser module stores the user's selection in GlobalStorage
-    # under key "packagechooser_packagechooser-tor".  Values are "tor" (default)
-    # or "direct".  If the key is absent we keep Tor enabled (safe default).
+    # Tor routing choice: the tor-config viewmodule writes "nailsOsTorEnabled"
+    # into globalStorage via its leaving() function.  We also accept the legacy
+    # packagechooser key as a fallback for compatibility with older sequences.
     # ------------------------------------------------------------------
-    tor_choice = gs.value("packagechooser_packagechooser-tor") or "tor"
-    tor_enabled = tor_choice != "direct"
-    libcalamares.utils.debug(
-        "packagechooser_torconfig={!r}  torEnabled={}".format(tor_choice, tor_enabled)
-    )
+
+    # Prefer the direct globalStorage bool set by the tor-config viewmodule;
+    # fall back to the packagechooser string key used by older sequences.
+    gs_tor_enabled = gs.value("nailsOsTorEnabled")
+    if gs_tor_enabled is not None:
+        tor_enabled = bool(gs_tor_enabled)
+        libcalamares.utils.debug(
+            "nailsOsTorEnabled={!r} (from tor-config viewmodule)".format(tor_enabled)
+        )
+    else:
+        tor_choice = gs.value("packagechooser_packagechooser-tor") or "tor"
+        tor_enabled = tor_choice != "direct"
+        libcalamares.utils.debug(
+            "packagechooser_torconfig={!r}  torEnabled={} (fallback)".format(
+                tor_choice, tor_enabled
+            )
+        )
 
     if not tor_enabled:
         status = _("Configuring network mode (direct)")
@@ -860,7 +874,45 @@ def write_user_config(gs, target_nixos, efi_mode):
 
         libcalamares.utils.debug("Wrote network-mode.nix (Tor disabled)")
     else:
-        libcalamares.utils.debug("Tor enabled (default) — no network-mode.nix written")
+        # ------------------------------------------------------------------
+        # Tor is enabled — write tor-bridges-mode.nix to record whether the
+        # user enabled pluggable-transport bridges.
+        #
+        # The nailsOs.tor.useBridges NixOS option (modules/tor.nix) defaults
+        # to true, so we always write the file explicitly to make the user's
+        # choice win regardless of the module default.
+        # ------------------------------------------------------------------
+        use_bridges = bool(gs.value("nailsOsTorUseBridges") or False)
+        libcalamares.utils.debug(
+            "Tor enabled — useBridges={} (from nailsOsTorUseBridges)".format(
+                use_bridges
+            )
+        )
+
+        status = _("Configuring Tor bridge mode")
+        libcalamares.job.setprogress(0.37)
+
+        use_bridges_nix_val = "true" if use_bridges else "false"
+        tor_bridges_nix = (
+            "# Written by the Calamares installer.\n"
+            "# nailsOs.tor.useBridges controls pluggable-transport bridge use.\n"
+            "{{ ... }}:\n"
+            "{{\n"
+            "  nailsOs.tor.useBridges = {};\n"
+            "}}\n"
+        ).format(use_bridges_nix_val)
+
+        tor_bridges_dest = os.path.join(
+            target_nixos, "hosts", "nails-os", "tor-bridges-mode.nix"
+        )
+        try:
+            write_file(tor_bridges_dest, tor_bridges_nix)
+        except RuntimeError as e:
+            return (_("Failed to write Tor bridge configuration"), str(e))
+
+        libcalamares.utils.debug(
+            "Wrote tor-bridges-mode.nix (useBridges={})".format(use_bridges)
+        )
 
     # ------------------------------------------------------------------
     # 5d. Write shell-history-mode.nix if user chose to enable shell history
