@@ -116,6 +116,23 @@ concurrency:
   group: build-iso-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NIX_SETUP_SCRIPT: |
+    curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+    mkdir -p /etc/nix
+    cat > /etc/nix/nix.conf << 'NIXCONF'
+    experimental-features = nix-command flakes
+    max-jobs = auto
+    cores = 0
+    sandbox = true
+    accept-flake-config = false
+    NIXCONF
+    systemctl restart nix-daemon
+    for bin in /nix/var/nix/profiles/default/bin/*; do
+      ln -sf "$bin" /usr/local/bin/
+    done
+
 jobs:
   # ===========================================================================
   # Job 1: Provision a Hetzner Cloud self-hosted runner
@@ -248,21 +265,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 2: ccx33 @ hel1 (Helsinki, FI)
@@ -283,21 +286,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 3: ccx33 @ fsn1 (Falkenstein, DE)
@@ -318,21 +307,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 4: ccx23 @ nbg1 (4 dedicated vCPU, 16GB RAM, 160GB SSD)
@@ -356,21 +331,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 5: ccx23 @ hel1
@@ -395,21 +356,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 6: ccx23 @ fsn1
@@ -435,21 +382,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 7: cpx41 @ nbg1 (8 shared vCPU, 16GB RAM, 240GB SSD)
@@ -476,21 +409,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 8: cpx41 @ hel1
@@ -518,21 +437,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 9: cpx41 @ fsn1 (last resort)
@@ -561,21 +466,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID || '' }}
-          pre_runner_script: |
-            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-            mkdir -p /etc/nix
-            cat > /etc/nix/nix.conf << 'NIXCONF'
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
-            NIXCONF
-            systemctl restart nix-daemon
-            for bin in /nix/var/nix/profiles/default/bin/*; do
-              ln -sf "$bin" /usr/local/bin/
-            done
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Determine which combo succeeded and export its outputs
@@ -753,7 +644,7 @@ jobs:
       # Checkout
       # -----------------------------------------------------------------------
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -1192,7 +1083,7 @@ jobs:
           fi
 
       - name: Upload SBOM and vulnerability artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
         with:
           name: nails-os-security-${{ github.sha }}
           path: |
@@ -1303,7 +1194,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Upload diffoscope report
         if: steps.l2-check.outputs.reproducible == 'false' && steps.l2-check.outputs.diffoscope_report != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
         with:
           name: diffoscope-report-${{ github.sha }}
           path: /tmp/diffoscope-report.html
@@ -1317,7 +1208,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Upload build metadata artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
         with:
           name: nails-os-iso-${{ github.sha }}
           path: |
