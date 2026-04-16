@@ -1,1 +1,10 @@
 result
+.direnv/
+.envrc
+.idea/
+.vscode/
+*.swp
+.ruff_cache/
+dist/
+.DS_Store
+Thumbs.db
