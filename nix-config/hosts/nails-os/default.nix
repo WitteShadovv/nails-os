@@ -4,8 +4,8 @@
     # Written by the Calamares installer with the user-chosen hostname.
     # Guarded by pathExists so the flake evaluates cleanly before installation.
   ] ++ lib.optional (builtins.pathExists ./hostname.nix) ./hostname.nix
-    # Written by the Calamares installer with the user-chosen network mode.
-    # Guarded by pathExists so the flake evaluates cleanly before installation.
+    # Written by the Calamares installer only when the user chose Direct mode.
+    # Absent = default Tor configuration remains active. Guarded by pathExists.
     ++ lib.optional (builtins.pathExists ./network-mode.nix) ./network-mode.nix
     # Written by the Calamares installer with the user-chosen shell history mode.
     # Guarded by pathExists so the flake evaluates cleanly before installation.

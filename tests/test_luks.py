@@ -18,7 +18,6 @@ def _make_gs(partitions, hostname="testhost", password="obscured"):
     gs["partitions"] = partitions
     gs["hostname"] = hostname
     gs["password"] = password
-    gs["username"] = "testuser"
     return gs
 
 

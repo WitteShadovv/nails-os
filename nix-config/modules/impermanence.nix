@@ -1,8 +1,8 @@
-{ config, lib, ... }:
+{ config, ... }:
 
 let
   inherit (config.nailsOs.homePersistence) selective;
-  user = config.nailsOs.primaryUser;
+  user = "amnesia";
 
   # Helper: persist a subdirectory of /home/${user} with restrictive permissions.
   homeDir = subdir: {
@@ -41,13 +41,6 @@ let
   }];
 in {
   imports = [ ./home-persistence.nix ];
-
-  options.nailsOs.primaryUser = lib.mkOption {
-    type = lib.types.str;
-    default = "amnesia";
-    description =
-      "The primary user account name. Used for impermanence home directory paths.";
-  };
 
   config = {
     # systemd initrd is required for impermanence's pivot-root behaviour.

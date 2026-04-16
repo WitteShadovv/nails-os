@@ -1,5 +1,0 @@
----
-type:       viewmodule
-interface:  python
-name:       tor-config
-script:     main.py

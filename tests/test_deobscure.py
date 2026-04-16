@@ -97,3 +97,28 @@ class TestDeobscureEdgeCases:
 
         for ch in string.printable:
             assert deobscure(deobscure(ch)) == ch
+
+
+class _GS:
+    def __init__(self, values):
+        self._values = values
+
+    def value(self, key):
+        return self._values.get(key)
+
+
+def test_write_user_config_returns_deterministic_error_for_invalid_obscured_password(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(main, "write_file", lambda path, content, mode=None: None)
+
+    result = main.write_user_config(
+        _GS({"hostname": "nails", "password": "🔐broken"}),
+        str(tmp_path),
+        efi_mode=True,
+    )
+
+    assert result == (
+        "Installation error",
+        "Could not decode the installer password value. Please go back, re-enter the password, and try again.",
+    )

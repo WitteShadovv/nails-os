@@ -14,15 +14,21 @@ let
           --width=560 \
           --height=480 \
           --text="<big><b>Welcome to NAILS OS</b></big>\n\n\
-    <b>🔒 Privacy by design</b>\n\
-    All your internet traffic is routed through the Tor network automatically. \
-    You don't need to configure anything — it just works.\n\n\
+    <b>🔒 Network mode</b>\n\
+    Your login account is <tt>amnesia</tt>. If you installed in Tor mode, \
+    TCP traffic is transparently routed through Tor and DNS is resolved \
+    through Tor. If you installed in Direct mode, traffic goes to the \
+    clearnet and the Tor-routing and Tor-DNS protections described above do \
+    not apply.\n\n\
     <b>🧹 Impermanence</b>\n\
     NAILS OS runs from a fresh tmpfs on every boot. Most of the system is \
-    wiped when you shut down. Only files in these locations persist:\n\
+    wiped when you shut down. In the default selective-persistence mode, only \
+    these locations persist:\n\
       • <tt>Documents, Downloads, Music, Pictures, Videos, Desktop</tt>\n\
       • <tt>~/.ssh</tt>, <tt>~/.gnupg</tt>, GNOME settings, keyring\n\
-    Everything else (browser history, cache, temp files) is gone on reboot.\n\n\
+    If you chose full home persistence during installation, all of \
+    <tt>/home/amnesia</tt> persists instead. Everything else (browser history, \
+    cache, temp files outside the persisted home) is gone on reboot.\n\n\
     <b>🌐 Unsafe Browser</b>\n\
     The \"Unsafe Browser\" bypasses Tor for captive-portal login only \
     (e.g. hotel/airport WiFi). <b>Never use it for private browsing.</b>\n\n\
@@ -35,10 +41,10 @@ let
       • <b>GIMP / Inkscape</b> — image editing\n\
     Find all apps in the Activities menu (top-left corner).\n\n\
     <b>⚡ Security tips</b>\n\
-      • Use Tor Browser for all web browsing\n\
+      • Use Tor Browser whenever you want Tor-routed browsing\n\
       • Shell history is disabled by default\n\
       • Disk encryption protects your persisted data\n\
-      • Check Tor status with Onion Circuits (in system tray)\n\
+      • Onion Circuits is useful only when the system is in Tor mode\n\
       • Never reveal personal information over Tor"
 
         # Mark as shown so it won't appear again.

@@ -4,8 +4,7 @@
 # nails_ui_common — Shared UI components for NAILS OS Calamares viewmodules.
 #
 # Provides the OptionCard widget, PySide6/PySide2 import compatibility,
-# and shared styling constants used across tor-config, history-config,
-# and home-persistence-config modules.
+# and shared styling constants used across the custom Calamares viewmodules.
 
 import libcalamares
 

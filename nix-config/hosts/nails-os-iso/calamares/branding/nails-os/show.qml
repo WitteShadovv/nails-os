@@ -70,7 +70,7 @@ Presentation {
     }
 
     /* ================================================================
-       Slide 2 — Tor Routing
+       Slide 2 — Network Modes
        ================================================================ */
     Slide {
         Rectangle {
@@ -84,7 +84,7 @@ Presentation {
 
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "🌐  All Traffic Through Tor"
+                    text: "🌐  Network Routing Choices"
                     color: headingColor
                     font { pixelSize: 24; bold: true }
                 }
@@ -95,13 +95,12 @@ Presentation {
                     color: bodyColor
                     font.pixelSize: 14
                     lineHeight: 1.5
-                    text: "Every network connection from NAILS OS is transparently " +
-                          "routed through the Tor network. You don't need to " +
-                          "configure anything — it's automatic and enforced at " +
-                          "the firewall level.\n\n" +
-                          "• Your real IP address is never exposed to the sites you visit\n" +
-                          "• DNS queries are resolved through Tor — no DNS leaks\n" +
-                          "• Pluggable transports (obfs4 & Snowflake) help bypass censorship\n\n" +
+                    text: "During installation you can choose between Tor mode " +
+                          "(recommended) and Direct mode.\n\n" +
+                          "• Tor mode transparently routes TCP traffic through Tor\n" +
+                          "• DNS is resolved through Tor in Tor mode\n" +
+                          "• Bundled obfs4 and Snowflake bridges help bypass censorship\n" +
+                          "• Direct mode disables Tor and uses a normal clearnet connection\n\n" +
                           "Use Tor Browser for web browsing. An \"Unsafe Browser\" is " +
                           "provided only for captive-portal login (hotel/airport WiFi)."
                 }
@@ -186,8 +185,8 @@ Presentation {
                           "Thunderbolt/USB4, slab hardening, and more\n\n" +
                           "• AppArmor — mandatory access control confines applications\n\n" +
                           "• No swap — sensitive data is never written to disk unencrypted\n\n" +
-                          "• Firewall-enforced Tor — even if an application tries to " +
-                          "bypass Tor, the firewall blocks it"
+                          "• In Tor mode, firewall rules enforce Tor routing and block " +
+                          "bypass attempts"
                 }
             }
         }
@@ -222,7 +221,7 @@ Presentation {
                     text: "After installation completes, your system will reboot. " +
                           "Here's what to expect:\n\n" +
                           "1. Enter your disk encryption passphrase at boot\n" +
-                          "2. Log in — Tor connects automatically in the background\n" +
+                          "2. Log in — your chosen network mode starts automatically\n" +
                           "3. A welcome guide will appear on first boot\n\n" +
                           "Key applications (find them in Activities):\n" +
                           "  • Tor Browser — anonymous web browsing\n" +

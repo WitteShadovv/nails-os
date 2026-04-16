@@ -14,12 +14,12 @@
 #   3b. Writes hosts/nails-os/boot-mode.nix with the detected bootloader
 #      config (systemd-boot for EFI, GRUB for BIOS).
 #   4. Writes hosts/nails-os/hostname.nix with the user-chosen hostname.
-#   5. Writes modules/secrets/<user>.passwd and modules/secrets.nix.
-#   6. Bind-mounts <root>/nix -> <root>/persist/nix so nixos-install writes
-#      the Nix store into the right place on the LUKS ext4.
+#   5. Writes modules/secrets/amnesia.passwd and modules/secrets.nix.
+#   6. Prepares the persisted directory tree on the target ext4.
 #   7. Runs nixos-install --flake <target>/etc/nixos#nails-os.
-#   8. Unmounts the bind-mount.
-#   9. Copies the flake into /persist/etc/nixos so it survives reboots.
+#   8. Fixes ownership/permissions for the persisted home backing store.
+#   9. No post-install flake copy is needed because the target ext4 already
+#      becomes /persist at runtime.
 #
 # Calamares globalStorage keys consumed:
 #   rootMountPoint   – target mount point            (set by mount module)
@@ -27,8 +27,8 @@
 #     each dict may carry:
 #       device, mountPoint, fs/fsName, uuid, luksPassphrase, luksMapperName
 #   hostname         – chosen hostname               (set by users module)
-#   username         – chosen login name             (set by users module)
-#   fullname         – chosen full name              (set by users module)
+#   username         – ignored; installed user is always amnesia
+#   fullname         – ignored; installed user is always amnesia
 #   password         – obscured user password        (set by users module)
 #   keyboardLayout   – X11 keyboard layout           (set by keyboard module)
 #   keyboardVariant  – X11 keyboard variant          (set by keyboard module)
@@ -44,6 +44,7 @@ import subprocess
 
 import libcalamares
 
+AMNESIA_USERNAME = "amnesia"
 QUAD9_DNS = "9.9.9.9"
 
 _ = gettext.translation(
@@ -110,6 +111,15 @@ def write_file(path, content, mode=None):
     run_cmd("tee", path, stdin=content)
     if mode:
         run_cmd("chmod", mode, path)
+
+
+def remove_file_if_exists(path):
+    """Remove *path* when present; raise RuntimeError on failure."""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError as ex:
+        raise RuntimeError("remove {} failed: {}".format(path, ex))
 
 
 def _calamares_deobscure(s):
@@ -327,7 +337,7 @@ def make_hardware_config(
   boot.initrd.availableKernelModules = {modules};
   boot.initrd.kernelModules = [ "dm_crypt" "dm_mod" ];
 
-  # LUKS2 container — opens as /dev/mapper/persist
+  # LUKS container — opens as /dev/mapper/persist
   boot.initrd.luks.devices."persist" = {{
     device = "/dev/disk/by-uuid/{luks_uuid}";
     preLVM  = true;
@@ -420,11 +430,11 @@ def detect_partitions(gs, root):
         "NAILS OS installer: boot mode = {}".format("EFI" if efi_mode else "BIOS")
     )
 
-    # boot_device: the /boot partition.
-    #   EFI mode  — plain FAT32 partition; skip any LUKS-encrypted /boot.
-    #   BIOS mode — plain ext4 partition; unencrypted so GRUB can read kernels.
+    # boot_device is only required for the EFI system partition.
+    # Supported BIOS installs do not use a separate plaintext /boot partition;
+    # GRUB targets the parent disk of the LUKS1 system volume instead.
     boot_device = None  # /boot block device
-    luks_device = None  # raw LUKS2 block device for root (not the mapper)
+    luks_device = None  # raw LUKS block device for root (not the mapper)
     luks_passphrase = None  # passphrase as entered in the Calamares UI
     luks_mapper_name = None  # e.g. "luks-<uuid>" — name opened by Calamares
 
@@ -436,9 +446,8 @@ def detect_partitions(gs, root):
 
         libcalamares.utils.debug("  partition: dev={} mp={} fs={}".format(dev, mp, fs))
 
-        # --- /boot partition ---
-        # EFI: accept only plaintext FAT32.  Skip LUKS-encrypted /boot.
-        # BIOS: accept ext4 /boot (unencrypted, GRUB-readable).
+        # --- EFI system partition ---
+        # Supported BIOS installs do not depend on a separate /boot entry here.
         if efi_mode:
             if mp == "/boot" and fs in ("fat32", "vfat"):
                 boot_device = dev
@@ -446,13 +455,6 @@ def detect_partitions(gs, root):
             elif fs in ("fat32", "vfat") and boot_device is None:
                 boot_device = dev
                 libcalamares.utils.debug("  → EFI (FAT32, tentative)")
-        else:
-            if mp == "/boot" and fs in ("ext4", "ext3", "ext2"):
-                boot_device = dev
-                libcalamares.utils.debug("  → BIOS /boot (ext4, by mountPoint)")
-            elif fs == "ext4" and boot_device is None and mp == "/boot":
-                boot_device = dev
-                libcalamares.utils.debug("  → BIOS /boot (ext4, tentative)")
 
         # --- Root / LUKS partition ---
         if mp == "/":
@@ -707,8 +709,8 @@ def write_user_config(gs, target_nixos, efi_mode):
     locale.nix, network-mode.nix (if Tor disabled), shell-history-mode.nix
     (if history enabled), and home-persistence-mode.nix (if full persistence).
 
-    Returns a dict with keys 'username' and 'home_persistence_full' on success
-    (needed by later steps), or (str, str) error tuple on failure.
+    Returns a dict with key 'home_persistence_full' on success, or
+    (str, str) error tuple on failure.
     """
     global status
 
@@ -745,15 +747,35 @@ def write_user_config(gs, target_nixos, efi_mode):
     status = _("Configuring users")
     libcalamares.job.setprogress(0.30)
 
-    # Username: Calamares stores it as "username".  We fall back to "amnesia"
-    # because NAILS OS hardcodes that account name in users.nix.
-    username = (gs.value("username") or "amnesia").strip() or "amnesia"
-    fullname = (gs.value("fullname") or username).strip()
-    libcalamares.utils.debug("username: {}  fullname: {}".format(username, fullname))
+    requested_username = (gs.value("username") or "").strip()
+    requested_fullname = (gs.value("fullname") or "").strip()
+    if requested_username and requested_username != AMNESIA_USERNAME:
+        libcalamares.utils.debug(
+            "Ignoring unsupported installer username {!r}; using {!r}".format(
+                requested_username, AMNESIA_USERNAME
+            )
+        )
+    if requested_fullname and requested_fullname != "Amnesia":
+        libcalamares.utils.debug(
+            "Ignoring installer fullname {!r}; using fixed account {!r}".format(
+                requested_fullname, AMNESIA_USERNAME
+            )
+        )
+    username = AMNESIA_USERNAME
+    libcalamares.utils.debug("username: {}".format(username))
 
     # Password: stored as "password" in GS, XOR-obscured.
     raw_password = gs.value("password") or ""
-    user_password = _calamares_deobscure(raw_password)
+    try:
+        user_password = _calamares_deobscure(raw_password)
+    except ValueError:
+        return (
+            _("Installation error"),
+            _(
+                "Could not decode the installer password value. "
+                "Please go back, re-enter the password, and try again."
+            ),
+        )
     if not user_password:
         return (_("Installation error"), _("No user password was provided."))
 
@@ -822,31 +844,24 @@ def write_user_config(gs, target_nixos, efi_mode):
     )
 
     # ------------------------------------------------------------------
-    # 5c. Write network-mode.nix if user chose to disable Tor, or
-    #     tor-bridges-mode.nix when Tor is enabled so that the bridge
-    #     preference set on the tor-config page reaches the installed config.
-    #
-    # Tor routing choice: the tor-config viewmodule writes "nailsOsTorEnabled"
-    # into globalStorage via its leaving() function.  We also accept the legacy
-    # packagechooser key as a fallback for compatibility with older sequences.
+    # 5c. Write network-mode.nix only when the existing packagechooser flow
+    #     selected Direct mode.  Tor mode keeps the runtime defaults from
+    #     modules/tor.nix, including the fixed supported bridge behaviour.
+    #     No separate bridge override file is generated.
     # ------------------------------------------------------------------
 
-    # Prefer the direct globalStorage bool set by the tor-config viewmodule;
-    # fall back to the packagechooser string key used by older sequences.
-    gs_tor_enabled = gs.value("nailsOsTorEnabled")
-    if gs_tor_enabled is not None:
-        tor_enabled = bool(gs_tor_enabled)
-        libcalamares.utils.debug(
-            "nailsOsTorEnabled={!r} (from tor-config viewmodule)".format(tor_enabled)
-        )
-    else:
-        tor_choice = gs.value("packagechooser_packagechooser-tor") or "tor"
-        tor_enabled = tor_choice != "direct"
-        libcalamares.utils.debug(
-            "packagechooser_torconfig={!r}  torEnabled={} (fallback)".format(
-                tor_choice, tor_enabled
-            )
-        )
+    tor_choice = gs.value("packagechooser_packagechooser-tor") or "tor"
+    tor_enabled = tor_choice != "direct"
+    libcalamares.utils.debug(
+        "packagechooser_torconfig={!r} torEnabled={}".format(tor_choice, tor_enabled)
+    )
+
+    network_mode_dest = os.path.join(
+        target_nixos, "hosts", "nails-os", "network-mode.nix"
+    )
+    tor_bridges_dest = os.path.join(
+        target_nixos, "hosts", "nails-os", "tor-bridges-mode.nix"
+    )
 
     if not tor_enabled:
         status = _("Configuring network mode (direct)")
@@ -863,55 +878,24 @@ def write_user_config(gs, target_nixos, efi_mode):
             '  networking.networkmanager.dns = lib.mkForce "default";\n'
             "}\n"
         )
-
-        network_mode_dest = os.path.join(
-            target_nixos, "hosts", "nails-os", "network-mode.nix"
-        )
         try:
             write_file(network_mode_dest, network_mode_nix)
+            remove_file_if_exists(tor_bridges_dest)
         except RuntimeError as e:
             return (_("Failed to write network mode configuration"), str(e))
 
         libcalamares.utils.debug("Wrote network-mode.nix (Tor disabled)")
     else:
-        # ------------------------------------------------------------------
-        # Tor is enabled — write tor-bridges-mode.nix to record whether the
-        # user enabled pluggable-transport bridges.
-        #
-        # The nailsOs.tor.useBridges NixOS option (modules/tor.nix) defaults
-        # to true, so we always write the file explicitly to make the user's
-        # choice win regardless of the module default.
-        # ------------------------------------------------------------------
-        use_bridges = bool(gs.value("nailsOsTorUseBridges") or False)
-        libcalamares.utils.debug(
-            "Tor enabled — useBridges={} (from nailsOsTorUseBridges)".format(
-                use_bridges
-            )
-        )
-
-        status = _("Configuring Tor bridge mode")
+        status = _("Configuring network mode (Tor)")
         libcalamares.job.setprogress(0.37)
-
-        use_bridges_nix_val = "true" if use_bridges else "false"
-        tor_bridges_nix = (
-            "# Written by the Calamares installer.\n"
-            "# nailsOs.tor.useBridges controls pluggable-transport bridge use.\n"
-            "{{ ... }}:\n"
-            "{{\n"
-            "  nailsOs.tor.useBridges = {};\n"
-            "}}\n"
-        ).format(use_bridges_nix_val)
-
-        tor_bridges_dest = os.path.join(
-            target_nixos, "hosts", "nails-os", "tor-bridges-mode.nix"
-        )
         try:
-            write_file(tor_bridges_dest, tor_bridges_nix)
+            remove_file_if_exists(network_mode_dest)
+            remove_file_if_exists(tor_bridges_dest)
         except RuntimeError as e:
-            return (_("Failed to write Tor bridge configuration"), str(e))
+            return (_("Failed to clean network mode configuration"), str(e))
 
         libcalamares.utils.debug(
-            "Wrote tor-bridges-mode.nix (useBridges={})".format(use_bridges)
+            "Tor mode selected — keeping default runtime Tor configuration"
         )
 
     # ------------------------------------------------------------------
@@ -1001,12 +985,11 @@ def write_user_config(gs, target_nixos, efi_mode):
         )
 
     return {
-        "username": username,
         "home_persistence_full": home_persistence_full,
     }
 
 
-def run_nixos_install(root, efi_mode, persist_root, username, home_persistence_full):
+def run_nixos_install(root, efi_mode, persist_root, home_persistence_full):
     """Prepare the /persist directory tree and run nixos-install.
 
     Creates the directory layout expected by impermanence on the target ext4,
@@ -1052,7 +1035,7 @@ def run_nixos_install(root, efi_mode, persist_root, username, home_persistence_f
         #   full     → one bind mount covering /home/amnesia entirely
         #   selective → individual bind mounts per curated subdirectory
         # In both cases chown -R in step 8 fixes ownership recursively.
-        home_persist = os.path.join(persist_root, "home", username)
+        home_persist = os.path.join(persist_root, "home", AMNESIA_USERNAME)
         run_cmd("mkdir", "-p", home_persist)
         run_cmd("chmod", "700", home_persist)
 
@@ -1136,20 +1119,20 @@ def run_nixos_install(root, efi_mode, persist_root, username, home_persistence_f
     return None
 
 
-def fix_permissions(root, persist_root, username):
+def fix_permissions(root, persist_root):
     """Fix ownership and permissions of the persisted home directory.
 
-    Reads the UID/GID for *username* from the installed system's /etc/passwd
+    Reads the UID/GID for the fixed amnesia user from the installed system's /etc/passwd
     and applies recursive chown + chmod 700 to the home directory backing
     store under *persist_root*.
 
     Returns None on success, (str, str) error tuple on failure.
     """
-    uid, gid = read_uid_gid(root, username)
+    uid, gid = read_uid_gid(root, AMNESIA_USERNAME)
     if not uid or not gid:
         return (
             _("Installation error"),
-            _("Could not determine UID/GID for user '{}'.").format(username),
+            _("Could not determine UID/GID for user '{}'.").format(AMNESIA_USERNAME),
         )
 
     try:
@@ -1157,9 +1140,9 @@ def fix_permissions(root, persist_root, username):
             "chown",
             "-R",
             "{}:{}".format(uid, gid),
-            os.path.join(persist_root, "home", username),
+            os.path.join(persist_root, "home", AMNESIA_USERNAME),
         )
-        run_cmd("chmod", "700", os.path.join(persist_root, "home", username))
+        run_cmd("chmod", "700", os.path.join(persist_root, "home", AMNESIA_USERNAME))
     except RuntimeError as e:
         return (_("Failed to set home ownership"), str(e))
 
@@ -1229,7 +1212,6 @@ def run():
     if isinstance(result, tuple):
         return result
 
-    username = result["username"]
     home_persistence_full = result["home_persistence_full"]
 
     # ------------------------------------------------------------------
@@ -1244,9 +1226,7 @@ def run():
     status = _("Installing NAILS OS (this will take a while)")
     libcalamares.job.setprogress(0.45)
 
-    result = run_nixos_install(
-        root, efi_mode, persist_root, username, home_persistence_full
-    )
+    result = run_nixos_install(root, efi_mode, persist_root, home_persistence_full)
     if result is not None:
         return result
 
@@ -1256,7 +1236,7 @@ def run():
     status = _("Fixing home directory permissions")
     libcalamares.job.setprogress(0.90)
 
-    result = fix_permissions(root, persist_root, username)
+    result = fix_permissions(root, persist_root)
     if result is not None:
         return result
 
