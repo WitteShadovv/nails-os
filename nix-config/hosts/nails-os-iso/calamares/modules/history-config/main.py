@@ -6,28 +6,15 @@
 # Shows a UI for the user to choose whether shell history should be
 # disabled (default) or enabled.
 #
-# The choice is written to /tmp/calamares-history-config.ini so the
-# nails-os exec module can read it.
-
-import configparser
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nails_ui_common import *  # noqa: F401,F403,E402
 
-_HISTORY_CONFIG_PATH = "/tmp/calamares-history-config.ini"
-
 
 def pretty_name():
     return "Shell History"
-
-
-def _write_ini(history_enabled: bool) -> None:
-    cp = configparser.ConfigParser()
-    cp["General"] = {"historyEnabled": "true" if history_enabled else "false"}
-    with open(_HISTORY_CONFIG_PATH, "w") as fh:
-        cp.write(fh)
 
 
 class HistoryConfigWidget(QWidget):
@@ -35,8 +22,6 @@ class HistoryConfigWidget(QWidget):
         super().__init__()
         self._history_enabled = False  # Default: disabled
         self._build_ui()
-        # Write the default immediately
-        _write_ini(False)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -168,14 +153,12 @@ class HistoryConfigWidget(QWidget):
     def _on_toggle(self, checked: bool):
         self._history_enabled = not checked
         self._warning_label.setVisible(not checked)
-        _write_ini(not checked)
 
     def history_enabled(self) -> bool:
         return self._history_enabled
 
     def set_history_enabled(self, enabled: bool):
         self._history_enabled = enabled
-        _write_ini(enabled)
 
 
 _widget = None
@@ -189,5 +172,4 @@ def create_widget():
 
 def leaving():
     """Called by Calamares when the user moves to the next step."""
-    if _widget is not None:
-        _write_ini(_widget.history_enabled())
+    pass

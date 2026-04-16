@@ -4,14 +4,17 @@
 # tor-config — Calamares Python viewmodule.
 #
 # Shows a UI for the user to choose whether all traffic should be routed
-# through Tor (default) or go directly to the internet.
+# through Tor (default) or go directly to the internet, and whether to
+# use Tor bridges for censored networks.
 #
-# The choice is written to /tmp/calamares-tor-config.ini so the
-# nails-os exec module can read it.
-
-import configparser
+# On leaving this step the following globalStorage keys are written:
+#   nailsOsTorEnabled   (bool) – True if Tor routing is selected
+#   nailsOsTorUseBridges (bool) – True if the "Use bridges" checkbox is ticked
+#
 import os
 import sys
+
+import libcalamares  # noqa: E402 – provided by the Calamares runtime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nails_ui_common import *  # noqa: F401,F403,E402
@@ -21,27 +24,43 @@ try:
 except ImportError:
     from PySide2.QtGui import QPixmap  # noqa: E402
 
-_TOR_CONFIG_PATH = "/tmp/calamares-tor-config.ini"
-
 
 def pretty_name():
     return "Network Routing"
-
-
-def _write_ini(tor_enabled: bool) -> None:
-    cp = configparser.ConfigParser()
-    cp["General"] = {"torEnabled": "true" if tor_enabled else "false"}
-    with open(_TOR_CONFIG_PATH, "w") as fh:
-        cp.write(fh)
 
 
 class TorConfigWidget(QWidget):
     def __init__(self):
         super().__init__()
         self._tor_enabled = True  # Default: Tor enabled
+        self._use_bridges = False  # Default: bridges checkbox unchecked
         self._build_ui()
-        # Write the default immediately
-        _write_ini(True)
+
+    # ------------------------------------------------------------------
+    # Methods called from QML via the calamaresWidget bridge
+    # ------------------------------------------------------------------
+
+    def set_tor_enabled(self, enabled: bool):
+        """Called by QML when the user switches between Tor / Direct."""
+        self._tor_enabled = enabled
+
+    def set_use_bridges(self, enabled: bool):
+        """Called by QML when the user ticks/unticks the bridges checkbox."""
+        self._use_bridges = enabled
+
+    # ------------------------------------------------------------------
+    # Read-only accessors (used by leaving())
+    # ------------------------------------------------------------------
+
+    def tor_enabled(self) -> bool:
+        return self._tor_enabled
+
+    def use_bridges(self) -> bool:
+        return self._use_bridges
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -169,14 +188,6 @@ class TorConfigWidget(QWidget):
     def _on_toggle(self, checked: bool):
         self._tor_enabled = checked
         self._warning_label.setVisible(not checked)
-        _write_ini(checked)
-
-    def tor_enabled(self) -> bool:
-        return self._tor_enabled
-
-    def set_tor_enabled(self, enabled: bool):
-        self._tor_enabled = enabled
-        _write_ini(enabled)
 
 
 _widget = None
@@ -189,6 +200,23 @@ def create_widget():
 
 
 def leaving():
-    """Called by Calamares when the user moves to the next step."""
-    if _widget is not None:
-        _write_ini(_widget.tor_enabled())
+    """Called by Calamares when the user moves to the next step.
+
+    Persists both the Tor routing choice and the bridge preference into
+    globalStorage so the nails-os exec module can read them when it
+    generates the installed system's NixOS configuration.
+    """
+    if _widget is None:
+        return
+
+    tor_enabled = _widget.tor_enabled()
+    use_bridges = _widget.use_bridges()
+
+    libcalamares.utils.debug(
+        "tor-config leaving: torEnabled={} useBridges={}".format(
+            tor_enabled, use_bridges
+        )
+    )
+
+    libcalamares.globalstorage.setValue("nailsOsTorEnabled", tor_enabled)
+    libcalamares.globalstorage.setValue("nailsOsTorUseBridges", use_bridges)
