@@ -32,7 +32,7 @@ Use these project interfaces and artifact names in docs, CI, and release workflo
 ## Public Policy
 
 - Public vulnerability policy and reporting SLA: [`../../SECURITY.md`](../../SECURITY.md)
-- BIOS/legacy boot limitation notes: [`../SECURITY.md`](../SECURITY.md)
+- BIOS/legacy boot limitation notes: [`../BIOS-SECURITY.md`](../BIOS-SECURITY.md)
 
 ## Ownership and Maintenance Cadence
 

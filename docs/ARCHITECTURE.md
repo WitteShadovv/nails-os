@@ -38,7 +38,7 @@ graph LR
     App -->|DNS :53| NFT
     NFT -->|"DNAT → 127.0.0.1:9040"| Tor[Tor TransPort]
     NFT -->|"DNS DNAT → 127.0.0.1:8853"| TorDNS[Tor DNSPort]
-    Tor --> Entry[Tor Entry Guard / Bridge]
+    Tor --> Entry[Tor Bridge / Entry Guard]
     Entry --> Circuit[Tor Circuit]
     Circuit --> Exit[Exit Relay]
     Exit --> Internet[Internet]
@@ -73,7 +73,7 @@ graph TD
     Hetzner --> Build[nix build]
     Build --> L1["L1: nix-store --realise --check"]
     Build --> L2["L2: full rebuild + SHA256 compare"]
-    Build --> Publish[Cloudflare R2 + GitHub Release]
+    Build --> Publish[Cloudflare R2 ISO + GitHub Release metadata]
 ```
 
 ## Flake Structure
@@ -126,7 +126,7 @@ settings.conf → UI sequence → exec sequence → nixos-install
 
 ### Exec Sequence
 
-1. **partition** — creates partitions (EFI: FAT32 + LUKS2; BIOS: bios_grub + ext4 /boot + LUKS2)
+1. **partition** — creates partitions (EFI: FAT32 + LUKS2 system volume; BIOS: MBR + single LUKS1 system volume)
 2. **mount** — mounts target filesystem
 3. **nails-os** — custom Python module (`modules/nails-os/main.py`) that:
    - Copies the flake from `/etc/nixos` to the target
@@ -134,7 +134,7 @@ settings.conf → UI sequence → exec sequence → nixos-install
    - Generates `hardware-configuration.nix` with tmpfs `/`, `/persist`, `/nix` bind
    - Writes `boot-mode.nix` (systemd-boot or GRUB)
    - Writes `hostname.nix`, `locale.nix`, `secrets.nix`
-   - Writes `network-mode.nix` if Direct mode chosen
+    - Writes `network-mode.nix` if Direct mode chosen
    - Writes `shell-history-mode.nix` if history enabled
    - Writes `home-persistence-mode.nix` if full home chosen
    - Runs `nixos-install --flake <target>/etc/nixos#nails-os`
@@ -169,8 +169,9 @@ The `nails-os` exec module writes `.nix` files into `hosts/nails-os/` on the tar
 ### Network Isolation (`tor.nix`)
 
 - nftables `inet filter` drops all outbound traffic not matching Tor UID, clearnet UID, or RFC1918
-- DNS is forcibly redirected to Tor's DNSPort — no DNS leaks possible
-- Tor's own UID gets a separate DNS DNAT to Quad9 (9.9.9.9) so pluggable transports can resolve broker addresses before circuits exist
+- DNS is forcibly redirected to Tor's DNSPort while Tor mode is enabled
+- Tor's own UID gets a separate DNS DNAT to Quad9 (9.9.9.9) so bundled pluggable transports can resolve broker addresses before circuits exist
+- Direct mode disables Tor and its transparent-proxy rules via `network-mode.nix`
 - The Unsafe Browser runs as the `clearnet` UID with access limited to ports 80/443
 - IPv6 is disabled system-wide
 
@@ -183,5 +184,7 @@ The `nails-os` exec module writes `.nix` files into `hosts/nails-os/` on the tar
 
 ### Disk Encryption
 
-- LUKS2 is mandatory — the installer refuses to proceed without it
-- On BIOS systems, LUKS1 is used (GRUB limitation) with an unencrypted `/boot` partition (see `docs/SECURITY.md` for implications)
+- The installer refuses to proceed without disk encryption
+- UEFI installs use LUKS2 for the encrypted system volume
+- BIOS installs use a single LUKS1-encrypted system volume so GRUB can unlock it, which also causes a double passphrase prompt at boot
+- See [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md) for BIOS/legacy boot limitations

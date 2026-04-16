@@ -9,9 +9,9 @@
 
 </div>
 
-> **A live NixOS distribution that routes all traffic through Tor and discards the root filesystem on every shutdown.**
+> **A live NixOS distribution that defaults to Tor-routed networking, also supports Direct mode, and discards the root filesystem on every shutdown.**
 >
-> NAILS OS combines a tmpfs root, transparent Tor proxying, and NixOS's declarative configuration
+> NAILS OS combines a tmpfs root, transparent Tor proxying in Tor mode, and NixOS's declarative configuration
 > system to provide a privacy-oriented computing environment within the documented threat model.
 > Built for reproducibility and auditability.
 
@@ -40,9 +40,9 @@
 ## Key Features
 
 - **Amnesic by default** — root filesystem is wiped on every reboot. Nothing persists unless explicitly declared on an encrypted volume.
-- **Tor by default** — all network traffic is transparently routed through Tor, including DNS. No traffic leaks.
-- **Pluggable transports** — obfs4 and Snowflake bridges are preconfigured for censorship circumvention.
-- **Full-disk encryption** — the installer enforces LUKS2 encryption. It will refuse to proceed without it.
+- **Tor by default** — the installer defaults to Tor mode, which transparently proxies TCP traffic through Tor and resolves DNS through Tor.
+- **Bundled Tor bridges** — when Tor mode is used, the shipped configuration enables bundled obfs4 and Snowflake bridges for censorship circumvention.
+- **Encrypted system volume** — the installer refuses unencrypted installs. UEFI installs use LUKS2; BIOS installs use a single-disk LUKS1 layout for GRUB compatibility.
 - **Kernel hardening** — memory zeroing on alloc/free, AppArmor, DMA attack surface removed (FireWire/Thunderbolt/USB4 blacklisted), SMT disabled, Spectre and MDS mitigations enabled.
 - **MAC address randomization** — WiFi and Ethernet MAC addresses are randomized on every connection. DHCP hostname sending is disabled.
 - **Curated privacy toolkit** — Tor Browser, OnionShare, Electrum, Thunderbird, Pidgin with OTR, KeePassXC, VeraCrypt, MAT2 (metadata removal), GnuPG, and more.
@@ -55,7 +55,7 @@
 NAILS OS is designed to protect against:
 
 - **Forensic analysis of the device** — tmpfs root means no trace after shutdown, unless the attacker has access to the encrypted persistent volume.
-- **Network surveillance** — all traffic goes through Tor; MAC addresses are randomized; DHCP does not leak the hostname.
+- **Network surveillance (Tor mode)** — TCP traffic is transparently proxied through Tor, DNS is resolved through Tor, MAC addresses are randomized, and DHCP does not leak the hostname.
 - **Data persistence on shared or borrowed hardware** — boot from USB, leave no trace.
 - **Censorship** — pluggable transports help circumvent Tor blocking in restrictive networks.
 
@@ -63,7 +63,7 @@ NAILS OS does **not** protect against:
 
 - **Targeted attacks by well-resourced adversaries with physical access** to the running machine (cold boot attacks, hardware implants).
 - **Compromised firmware or BIOS** — NAILS OS runs on commodity hardware and trusts the firmware layer.
-- **Evil maid attacks on BIOS installs** — on BIOS/legacy hardware the `/boot` partition is unencrypted and can be tampered with by an attacker with physical access to the powered-off machine. See [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md).
+- **Boot-chain tampering by a powered-off attacker** — NAILS OS does not currently configure a verified boot chain. Physical access to a powered-off machine remains out of scope, including BIOS/legacy installs that rely on GRUB-compatible disk encryption. See [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md).
 - **User error** — if you log into personal accounts over Tor, you deanonymize yourself.
 - **Correlation attacks** — a global passive adversary can correlate Tor entry and exit traffic.
 - **Exit node eavesdropping** — unencrypted traffic leaving the Tor network is visible to the exit relay. Always use HTTPS or end-to-end encryption for sensitive communications.
@@ -80,7 +80,7 @@ No software can substitute for sound operational security practices.
 | Boot | UEFI (systemd-boot) or Legacy BIOS (GRUB 2) |
 | RAM | 4 GB minimum (root filesystem runs entirely from RAM) |
 | USB | 4 GB minimum for the installer ISO |
-| Disk | Any size; fully encrypted. EFI: 1 GiB FAT32 + LUKS2. BIOS: 1 MiB bios_grub + 1 GiB ext4 `/boot` + LUKS2. |
+| Disk | Any size; encrypted. UEFI: 1 GiB FAT32 EFI system partition + LUKS2 system volume. BIOS: MBR + single LUKS1 system volume unlocked by GRUB. |
 
 ## Download
 
@@ -142,12 +142,12 @@ gh attestation verify checksums.txt --repo WitteShadovv/nails-os
 1. Boot the ISO from USB.
 2. The Calamares installer launches from the desktop.
 3. Select locale, keyboard, and target disk.
-4. Set a password for the `amnesia` user account.
+4. Set a password for the fixed `amnesia` user account.
 5. Choose network routing: Tor (recommended) or Direct.
 6. Review and install.
 7. Reboot into NAILS OS. The system boots into a GNOME desktop.
 
-The installer detects the boot mode and creates the appropriate layout. On UEFI systems: a 1 GiB FAT32 EFI partition and a LUKS2-encrypted root. On BIOS/legacy systems: a 1 MiB BIOS boot partition, a 1 GiB ext4 `/boot` (unencrypted), and a LUKS2-encrypted root. See [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md) for the security implications of the unencrypted `/boot` on BIOS. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
+The installer detects the boot mode and creates the appropriate layout. On UEFI systems: a 1 GiB FAT32 EFI partition and a LUKS2-encrypted system volume. On BIOS/legacy systems: an MBR layout with a single LUKS1-encrypted system volume so GRUB can unlock it at boot. On BIOS installs this means a double passphrase prompt (GRUB, then initrd), not a separate plaintext `/boot` partition. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume. See [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md) for boot-chain limitations.
 
 **Default user:** `amnesia` (UID 1000, member of wheel, networkmanager, video, audio).
 
@@ -162,10 +162,10 @@ nixos-install --flake /etc/nixos#nails-os
 
 ## Network Modes
 
-- **Tor (default):** All TCP transparently proxied through Tor. DNS resolved through Tor. Unsafe Browser available for captive portals. obfs4 and Snowflake bridges active.
-- **Direct:** Normal clearnet routing with Quad9 DNS (9.9.9.9, 149.112.112.112). No Tor. Your IP address is visible to the network.
+- **Tor (default):** All TCP is transparently proxied through Tor. DNS is resolved through Tor. The installed Tor configuration enables bundled obfs4 and Snowflake bridges. Unsafe Browser remains available for captive portals.
+- **Direct:** Tor and its transparent-proxy rules are disabled. Networking uses normal clearnet routing with Quad9 DNS (`9.9.9.9`, `149.112.112.112`). Your IP address is visible to the network.
 
-The network mode is chosen during installation. It can be changed post-install by editing `nix-config/hosts/nails-os/network-mode.nix`.
+The current installer exposes only the Tor-vs-Direct choice. If you choose Direct, the installer writes `nix-config/hosts/nails-os/network-mode.nix`; otherwise the default Tor configuration remains in effect.
 
 ## Persistence Model
 
@@ -183,9 +183,9 @@ Everything else — logs, temp files, browser state, application data outside ho
 
 The project uses an automated CI/CD pipeline with ephemeral Hetzner Cloud servers as GitHub Actions runners.
 
-**Build pipeline** (`build-iso.yml`): Triggered on pushes to `main`, pull requests, manual dispatch, or as a reusable workflow. Provisions an ephemeral build server on Hetzner Cloud, builds the ISO, runs L1 and L2 reproducibility checks, then unconditionally destroys the server.
+**Build pipeline** (`build-iso.yml`): Triggered on pushes to `main`, pull requests, manual dispatch, or as a reusable workflow. Provisions an ephemeral build server on Hetzner Cloud, builds the ISO, generates SBOM/vulnerability artifacts, runs L1 and L2 reproducibility checks, uploads the ISO to Cloudflare R2 when configured, then unconditionally destroys the server. Pushes to `main` also publish a rolling GitHub pre-release tagged `latest-{commit}` with metadata assets and an external ISO link.
 
-**Release pipeline** (`release.yml`): Triggered on `v*` tag pushes or manual dispatch. Calls the build pipeline, then creates a GitHub Release with the ISO, checksums.txt, and build metadata as release assets. Generates Sigstore build provenance attestation (verifiable with `gh attestation verify`).
+**Release pipeline** (`release.yml`): Triggered on `v*` tag pushes or manual dispatch. Calls the build pipeline with the stable publication path, requires successful stable R2 upload outputs, then creates a GitHub Release whose notes point to the R2-hosted ISO. The release attaches `checksums.txt`, `build-metadata.json`, and release metadata/security artifacts. For public repositories it also generates build provenance attestation for `checksums.txt` (verifiable with `gh attestation verify`).
 
 **Failsafe cleanup** (`hetzner-cleanup.yml`): Runs daily at 00:01 UTC. Destroys any servers remaining in the Hetzner project to prevent orphaned servers from accruing charges. Creates a GitHub Issue notification if any servers were cleaned up.
 
@@ -206,7 +206,7 @@ Configure under Settings > Secrets and variables > Actions > Variables:
 
 | Variable | Description |
 |---|---|
-| `HCLOUD_SSH_KEY_ID` | **Numeric ID** of an SSH key uploaded to your Hetzner Cloud project. When set, the build server is provisioned with this key and Hetzner will not email a root password. If omitted, the pipeline still works but Hetzner sends a root password email for every build. |
+| `HCLOUD_SSH_KEY_ID` | **Required numeric ID** of an SSH key uploaded to your Hetzner Cloud project. The workflow refuses to provision a runner without it. |
 
 **Important:** `HCLOUD_SSH_KEY_ID` requires the **numeric ID** of the SSH key — not its name or fingerprint. To find it: go to [Hetzner Cloud Console](https://console.hetzner.cloud) > your project > Security > SSH Keys, click the key, and copy the ID shown in the URL or key details (a number like `12345678`).
 
@@ -303,6 +303,13 @@ qemu-system-x86_64 -enable-kvm -m 4096 -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom
 # Test BIOS/Legacy mode install
 qemu-system-x86_64 -enable-kvm -m 4096 -cdrom result/iso/*.iso
 ```
+
+### Maintainer verification checklist
+
+- [ ] Fixed user model: docs and installer wording refer only to the `amnesia` account.
+- [ ] Network-mode wording matches current behavior: installer offers Tor vs Direct only; Tor mode keeps the default bundled bridges; Direct disables Tor via `network-mode.nix`.
+- [ ] Stable release wording matches workflow gates: stable publication requires successful R2 outputs, and the ISO is linked from R2 rather than attached directly to the GitHub Release.
+- [ ] Security reporting docs use the canonical contact `security@nails.run` and agree with [`SECURITY.md`](SECURITY.md).
 
 ## Acknowledgments
 

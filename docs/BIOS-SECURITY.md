@@ -1,73 +1,58 @@
-# Security Notes
+# BIOS / Legacy Boot Security Notes
 
-## BIOS/Legacy Boot and the Evil Maid Attack
+## What BIOS installs actually do today
 
-When NAILS OS is installed on a BIOS/legacy system, the `/boot` partition is
-**not encrypted**. This is a deliberate architectural constraint, not an oversight.
+On BIOS/legacy systems, NAILS OS does **not** create a separate plaintext `/boot`
+partition.
 
-### Why /boot is unencrypted on BIOS systems
+Instead, the installer uses:
 
-GRUB 2 cannot unlock LUKS2 containers that use **argon2id** as the key
-derivation function. Argon2id is the default PBKDF for LUKS2 (the format
-Calamares produces), because it is memory-hard and resistant to brute force.
-GRUB's LUKS2 support only covers the older `pbkdf2` KDF.
+- an MBR partition table
+- a single **LUKS1-encrypted** system volume covering the disk
+- GRUB 2 with `cryptodisk` support so GRUB can unlock that volume before loading the kernel
 
-The standard workaround — used by most BIOS-era full-disk-encryption setups
-including Debian and Fedora — is a small, unencrypted `/boot` partition. GRUB
-reads the kernel and initrd from plaintext `/boot`, loads them into memory, and
-exits. The initrd then prompts for the LUKS passphrase and unlocks the
-encrypted root volume. The LUKS2 argon2id protection on `/persist` is fully
-intact.
+This differs from the UEFI path, which uses an unencrypted EFI system partition
+plus a LUKS2-encrypted system volume.
 
-### The evil maid attack
+## Why BIOS uses LUKS1
 
-An attacker with **physical access to the machine while it is powered off**
-can modify the contents of the unencrypted `/boot` partition without leaving
-obvious traces. On the next boot, GRUB loads the tampered kernel or initrd,
-which can silently capture the LUKS passphrase or exfiltrate data before
-handing off to the real system.
+Current NAILS OS BIOS installs use LUKS1 because GRUB must unlock the encrypted
+disk before the kernel and initrd can be loaded, and the deployed GRUB path is
+the compatibility constraint here.
 
-This is the **evil maid attack**: a physically present adversary tampers with
-the boot chain in a way the user cannot detect at boot time.
+Practical consequence: BIOS installs prompt for the disk passphrase twice at
+boot — once in GRUB, then again in the initrd.
 
-NAILS OS on BIOS **does not protect against this attack**. Neither does Tails,
-nor most other encrypted Linux distributions on BIOS hardware. It is an
-inherent limitation of the BIOS boot model.
+## What the real limitation is
 
-### Mitigations
+The main BIOS/legacy limitation is **boot-chain trust**, not a plaintext `/boot`
+partition.
 
-1. **Use UEFI hardware.** On EFI systems NAILS OS uses systemd-boot. The EFI
-   system partition is also unencrypted, but with Secure Boot enabled the
-   firmware verifies the bootloader signature before executing it, preventing
-   an attacker from loading unsigned code. NAILS OS does not currently enroll
-   custom Secure Boot keys, so this protection depends on the platform's
-   default key database.
+NAILS OS does not currently configure verified boot on installed systems. An
+attacker with physical access to a powered-off machine may still be able to
+tamper with firmware, GRUB components, or other early-boot code and capture the
+passphrase on a later boot.
 
-2. **Prefer UEFI over BIOS whenever possible.** Most hardware manufactured
-   after 2012 supports UEFI. If your machine offers both, boot the NAILS OS
-   installer in UEFI mode to get the EFI partition layout and systemd-boot.
+That risk is broader than BIOS alone, but BIOS/legacy mode keeps the older
+GRUB-based path and its LUKS1 compatibility trade-offs.
 
-3. **Physical tamper evidence.** If you must use BIOS, apply tamper-evident
-   measures to the machine (case seals, glitter nail polish on screws, chassis
-   intrusion detection). These are low-tech but reliable at detecting
-   interference.
+## Practical guidance
 
-4. **Do not leave the machine unattended in a hostile environment.** The evil
-   maid attack requires physical access. Remove the drive or take the machine
-   with you when leaving an untrusted location.
+1. **Prefer UEFI when available.** It avoids the BIOS-specific GRUB+LUKS1 path.
+2. **Treat physical access as out of scope.** Do not leave the machine
+   unattended in hostile environments.
+3. **Use tamper-evident measures** if you must rely on shared or exposed
+   hardware.
+4. **Understand the boot prompts.** A BIOS install asking for the passphrase
+   twice is expected with the current design.
 
-### Summary
+## Summary
 
-| Property                            | EFI install       | BIOS install          |
-|-------------------------------------|-------------------|-----------------------|
-| Bootloader                          | systemd-boot      | GRUB 2                |
-| `/boot` partition encrypted         | No (FAT32)        | No (ext4)             |
-| Evil maid via `/boot` tampering     | Possible          | Possible              |
-| Secure Boot mitigation available    | Yes (partial)     | No                    |
-| Recommended                         | Yes               | Only if no UEFI       |
-| `/persist` LUKS2 argon2id strength  | Full              | Full                  |
-
-The encrypted `/persist` volume provides identical LUKS2 argon2id protection
-on both EFI and BIOS installs. The difference is only in the boot chain —
-once the system is booted and the passphrase has been entered, security is
-equivalent.
+| Property | UEFI install | BIOS install |
+|---|---|---|
+| Bootloader | systemd-boot | GRUB 2 |
+| Separate plaintext `/boot` partition | EFI system partition only | No |
+| Encrypted system volume format | LUKS2 | LUKS1 |
+| Verified boot configured by NAILS OS | No | No |
+| Double passphrase prompt at boot | No | Yes |
+| Recommended | Yes | Fallback when UEFI is unavailable |
