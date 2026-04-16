@@ -1,0 +1,45 @@
+# Changelog
+
+All notable changes to NAILS OS will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+### Added
+- Tor, shell history, and home persistence choosers with icons in Calamares installer
+- Selective home persistence — curated set of directories vs. full home
+- Shell history disabling option in Calamares
+- BIOS/Legacy boot support alongside existing UEFI (GRUB 2 with LUKS1)
+- SBOM generation and dependency hygiene release controls
+- Cloudflare R2 hosting for ISO artifacts (bypasses GitHub 2 GB limit)
+- Hetzner Cloud cost tracking with €20/month budget gate
+- Daily Hetzner failsafe cleanup workflow
+- Reproducible ISO build pipeline with ephemeral Hetzner runners (L1 + L2 checks)
+- Rolling `latest-*` pre-releases from `main`
+- Sigstore build provenance attestation for releases
+- obfs4 and Snowflake pluggable transport bridges (Tor Project defaults)
+- Transparent Tor proxying with nftables — all TCP + DNS routed through Tor
+- Unsafe Browser for captive portal login (sandboxed clearnet user)
+- MAC address randomization on every connection
+- Kernel hardening (memory zeroing, AppArmor, DMA blacklist, SMT disabled)
+- Full-disk encryption enforcement (LUKS2 required by installer)
+- tmpfs root with declarative persistence via nix-community/impermanence
+- Calamares GUI installer with automatic partition layout detection
+- GNOME desktop with curated privacy toolkit
+- IPv6 disabled to prevent Tor bypass
+
+### Fixed
+- EFI mount path aligned with Calamares NixOS mount module
+- Chooser icon sizing and scrollbar visibility in installer
+- BIOS boot end-to-end with LUKS1
+- Tor transparent proxy DNS resolution and obfs4 bridge connectivity
+- Duplicate EFI partition in partition layout
+- World-writable build directory in installer
+- Username locked to `amnesia` via Calamares preset
+
+## [0.1.0] — Initial Development
+
+Barebones version of NAILS OS — NixOS-based amnesic live system with Tor routing.
+
+[Unreleased]: https://github.com/WitteShadovv/nails-os/compare/main...HEAD

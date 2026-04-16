@@ -1,8 +1,114 @@
 # Contributing
 
-Contributor workflow for NAILS OS.
+Contributor guide for NAILS OS.
 
 For general project overview, see [`../README.md`](../README.md).
+For architecture details, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## Getting Started
+
+### Fork → Branch → PR Workflow
+
+1. **Fork** the repository on GitHub.
+2. **Clone** your fork locally:
+   ```bash
+   git clone https://github.com/<your-username>/nails-os.git
+   cd nails-os
+   ```
+3. **Create a branch** from `main`:
+   ```bash
+   git checkout -b feat/my-change
+   ```
+   Use prefixes: `feat/`, `fix/`, `docs/`, `refactor/`, `ci/`.
+4. **Make your changes**, commit with descriptive messages.
+5. **Push** to your fork:
+   ```bash
+   git push origin feat/my-change
+   ```
+6. **Open a Pull Request** against `main` on the upstream repository.
+
+### Dev Environment Setup
+
+NAILS OS uses Nix flakes. Install [Nix](https://nixos.org/download) and enable flakes in `~/.config/nix/nix.conf`:
+
+```
+experimental-features = nix-command flakes
+```
+
+Enter the development shell (if a `devShell` is configured):
+
+```bash
+nix develop ./nix-config
+```
+
+Install pre-commit hooks:
+
+```bash
+pre-commit install
+```
+
+Hooks include: `nixfmt` (formatting), `deadnix` (dead code), `statix` (linting), `nix-instantiate --parse` (syntax), `detect-secrets`, standard checks (trailing whitespace, YAML/JSON validation, merge conflict detection), and a full NixOS configuration evaluation.
+
+### Building the ISO
+
+```bash
+nix build ./nix-config#nails-os-iso
+
+# Find the built ISO
+ls result/iso/
+```
+
+### Testing Changes
+
+```bash
+# Validate the configuration evaluates successfully
+nix eval ./nix-config#nixosConfigurations.nails-os.config.system.build.toplevel.drvPath
+
+# Test in QEMU (UEFI mode — requires OVMF)
+qemu-system-x86_64 -enable-kvm -m 4096 -bios /usr/share/OVMF/OVMF_CODE.fd -cdrom result/iso/*.iso
+
+# Test in QEMU (BIOS/Legacy mode)
+qemu-system-x86_64 -enable-kvm -m 4096 -cdrom result/iso/*.iso
+```
+
+## Coding Style
+
+### Nix
+
+- Format with **nixfmt** (enforced by pre-commit).
+- Use `lib.mk*` functions for option declarations.
+- Guard optional imports with `lib.optional (builtins.pathExists ...)`.
+- Keep modules focused — one concern per file.
+- Avoid `with pkgs;` in module-level scope; prefer explicit `pkgs.foo`.
+
+### Python (Calamares modules)
+
+- Follow PEP 8.
+- Use `libcalamares.utils.debug()` for logging.
+- Handle errors by returning `(title, message)` tuples — never raise unhandled exceptions in `run()`.
+- Use `run_cmd()` / `run_stream()` helpers for subprocess calls.
+
+### Commit Messages
+
+Follow the conventional format used in the project:
+
+```
+type(scope): short description
+
+# Examples:
+feat(installer): add tor chooser with icons
+fix(ci): correct R2 upload path for releases
+docs(readme): update build instructions
+refactor(tor): extract bridge configuration
+```
+
+## Pull Request Checklist
+
+- [ ] Configuration evaluates: `nix eval ./nix-config#nixosConfigurations.nails-os.config.system.build.toplevel.drvPath`
+- [ ] ISO builds: `nix build ./nix-config#nails-os-iso`
+- [ ] Pre-commit hooks pass
+- [ ] No unrelated lockfile churn in `flake.lock`
+- [ ] Documentation updated if behavior changed
 
 ## Security and Dependency Workflow
 
@@ -20,7 +126,7 @@ Do **not** open public issues for vulnerabilities.
 
 - Preferred: GitHub private advisory reporting
   - <https://github.com/WitteShadovv/nails-os/security/advisories/new>
-- Alternate: `security@[project-domain]` (placeholder)
+- Alternate: `security@nails.run`
 
 ## Submitting Security Fixes
 
@@ -30,13 +136,6 @@ When your PR addresses a CVE/GHSA/security defect:
 2. Include before/after scan evidence.
 3. Update `nix-config/flake.lock` if dependency remediation is required.
 4. Run validation commands from [`security/security-validation.md`](security/security-validation.md).
-
-Minimum PR checklist:
-
-- [ ] Evaluation/build succeeds
-- [ ] Relevant vulnerability scans included
-- [ ] No unrelated lockfile churn
-- [ ] Docs updated when behavior/policy changed
 
 ## Routine Dependency Update Contributions
 
@@ -57,3 +156,9 @@ Recommended maintenance cadence:
 - weekly: scan + dependency review
 - monthly: docs link/command verification
 - quarterly: policy/SLA review
+
+## Code of Conduct
+
+Contributors are expected to behave professionally and respectfully. Harassment, discrimination, and abusive behavior will not be tolerated. The maintainers reserve the right to remove contributions or ban contributors who violate these expectations.
+
+When in doubt, be kind. Assume good intent. Focus on the work.
