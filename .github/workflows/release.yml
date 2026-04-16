@@ -447,11 +447,21 @@ jobs:
           R2_ISO_NAME: ${{ needs.build.outputs.r2_iso_name }}
           R2_UPLOADED: ${{ needs.build.outputs.r2_uploaded }}
         run: |
+          set -euo pipefail
           echo "R2_UPLOADED=${R2_UPLOADED:-<empty>}"
           echo "R2_ISO_NAME=${R2_ISO_NAME:-<empty>}"
           echo "R2_PUBLIC_URL=${R2_PUBLIC_URL:+set (redacted)}"
           if [ "${R2_UPLOADED}" != "true" ]; then
-            echo "::warning::R2 upload output is '${R2_UPLOADED}' (expected 'true'). Download link may fall back to build-metadata.json."
+            echo "::error::Stable release publication requires R2 upload output 'true'."
+            exit 1
+          fi
+          if [ -z "${R2_ISO_NAME}" ]; then
+            echo "::error::Stable release publication requires a non-empty R2 ISO output name."
+            exit 1
+          fi
+          if [ -z "${R2_PUBLIC_URL:-}" ]; then
+            echo "::error::Stable release publication requires R2_PUBLIC_URL to generate the published download link."
+            exit 1
           fi
 
       - name: Generate release notes
@@ -498,17 +508,6 @@ jobs:
           r2_vuln_uploaded = os.environ.get("R2_VULN_UPLOADED", "false")
           vuln_summary = os.environ.get("VULN_SUMMARY", "unknown")
           dep_diff_section = os.environ.get("DEPENDENCY_DIFF_SECTION", "### Dependency Diff\n\n- Unavailable.\n")
-
-          # Fall back to build-metadata.json for ISO filename if R2 output is missing
-          if not r2_iso_name:
-              try:
-                  with open("dist/build-metadata.json") as f:
-                      meta = json.load(f)
-                  r2_iso_name = meta.get("iso", {}).get("filename", "")
-                  if r2_iso_name:
-                      print(f"::notice::R2_ISO_NAME was empty, resolved from build-metadata.json: {r2_iso_name}")
-              except Exception as e:
-                  print(f"::warning::Could not read ISO name from build-metadata.json: {e}")
 
           if repro_status == "true":
               repro_badge = "Reproducible build verified"
