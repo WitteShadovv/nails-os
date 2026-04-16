@@ -26,7 +26,7 @@ Use GitHub private reporting:
 
 ### Alternate channel
 
-- Email: `security@[project-domain]` **(maintainer must replace placeholder)**
+- Email: `security@nails.run`
 
 If available, include encrypted details (PGP/public key exchange by email).
 
@@ -39,6 +39,8 @@ If available, include encrypted details (PGP/public key exchange by email).
 - Disclosure intent/timeline (if any)
 
 ## Response SLA (by severity)
+
+> **Note:** NAILS OS is maintained by a solo developer. The targets below are best-effort goals, not guaranteed SLAs. Response times may vary.
 
 SLA starts after report acknowledgment.
 
@@ -69,6 +71,6 @@ Severity is assigned in NAILS OS context (Tor routing, persistence, encryption, 
 
 ## Related Security Notes
 
-- BIOS/legacy evil-maid limitation: [`docs/SECURITY.md`](docs/SECURITY.md)
+- BIOS/legacy evil-maid limitation: [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md)
 
 Thank you for helping improve NAILS OS security.

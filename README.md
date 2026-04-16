@@ -3,6 +3,7 @@
   <h1>NAILS OS</h1>
 
 [![Build ISO](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml/badge.svg)](https://github.com/WitteShadovv/nails-os/actions/workflows/build-iso.yml)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange)](https://github.com/WitteShadovv/nails-os)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![NixOS 25.11](https://img.shields.io/badge/NixOS-25.11-5277C3.svg?logo=nixos&logoColor=white)](https://nixos.org)
 
@@ -62,7 +63,7 @@ NAILS OS does **not** protect against:
 
 - **Targeted attacks by well-resourced adversaries with physical access** to the running machine (cold boot attacks, hardware implants).
 - **Compromised firmware or BIOS** — NAILS OS runs on commodity hardware and trusts the firmware layer.
-- **Evil maid attacks on BIOS installs** — on BIOS/legacy hardware the `/boot` partition is unencrypted and can be tampered with by an attacker with physical access to the powered-off machine. See [`docs/SECURITY.md`](docs/SECURITY.md).
+- **Evil maid attacks on BIOS installs** — on BIOS/legacy hardware the `/boot` partition is unencrypted and can be tampered with by an attacker with physical access to the powered-off machine. See [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md).
 - **User error** — if you log into personal accounts over Tor, you deanonymize yourself.
 - **Correlation attacks** — a global passive adversary can correlate Tor entry and exit traffic.
 - **Exit node eavesdropping** — unencrypted traffic leaving the Tor network is visible to the exit relay. Always use HTTPS or end-to-end encryption for sensitive communications.
@@ -107,6 +108,8 @@ See [ISO Verification](#iso-verification) for build provenance verification.
 
 Requires [Nix with flakes enabled](https://nixos.org/download) (enable flakes in `~/.config/nix/nix.conf`).
 
+> **Build times:** A full ISO build takes **1–3 hours** depending on hardware and network speed. The CI pipeline has a 180-minute timeout. Subsequent builds with a warm Nix store are significantly faster.
+
 ```bash
 nix build ./nix-config#nails-os-iso
 
@@ -144,7 +147,7 @@ gh attestation verify checksums.txt --repo WitteShadovv/nails-os
 6. Review and install.
 7. Reboot into NAILS OS. The system boots into a GNOME desktop.
 
-The installer detects the boot mode and creates the appropriate layout. On UEFI systems: a 1 GiB FAT32 EFI partition and a LUKS2-encrypted root. On BIOS/legacy systems: a 1 MiB BIOS boot partition, a 1 GiB ext4 `/boot` (unencrypted), and a LUKS2-encrypted root. See [`docs/SECURITY.md`](docs/SECURITY.md) for the security implications of the unencrypted `/boot` on BIOS. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
+The installer detects the boot mode and creates the appropriate layout. On UEFI systems: a 1 GiB FAT32 EFI partition and a LUKS2-encrypted root. On BIOS/legacy systems: a 1 MiB BIOS boot partition, a 1 GiB ext4 `/boot` (unencrypted), and a LUKS2-encrypted root. See [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md) for the security implications of the unencrypted `/boot` on BIOS. Root runs as tmpfs; `/persist` holds the Nix store and user home on the encrypted volume.
 
 **Default user:** `amnesia` (UID 1000, member of wheel, networkmanager, video, audio).
 
@@ -256,7 +259,6 @@ nails-os/
       base.nix                 # Base system settings
       boot.nix                 # bootloader (systemd-boot or GRUB), initrd, kernel
       home.nix                 # Home Manager integration
-      storage.nix              # Disk layout, LUKS, mount points
       tor.nix                  # Tor transparent proxy + bridges + nftables
       security.nix             # Kernel hardening, AppArmor
       impermanence.nix         # tmpfs root + persistence declarations
