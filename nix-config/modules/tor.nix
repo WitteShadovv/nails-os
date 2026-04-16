@@ -5,16 +5,35 @@ let
   torUid = config.users.users.tor.uid;
   clearnetUid = config.users.users.clearnet.uid;
   rfc1918 = "{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }";
-  transportPlugins = lib.flatten [
-    (lib.optional (pkgs ? obfs4) "obfs4 exec ${pkgs.obfs4}/bin/lyrebird")
-    (lib.optional (pkgs ? snowflake)
-      "snowflake exec ${pkgs.snowflake}/bin/client")
+
+  # External DNS resolver used by the tor uid for PT bootstrap (e.g. snowflake
+  # broker resolution) before any Tor circuit exists.  Quad9 is a non-logging,
+  # DNSSEC-validating resolver operated by the Quad9 Foundation (Swiss non-profit).
+  quad9 = "9.9.9.9";
+  transportPlugins = [
+    "obfs4 exec ${pkgs.obfs4}/bin/lyrebird"
+    "snowflake exec ${pkgs.snowflake}/bin/client"
   ];
   # ---------------------------------------------------------------------------
   # Default bridges from Tor Browser's pt_config.json — the same set that
   # Tails and Tor Browser ship.  These are the Tor Project's official
   # "default bridges" maintained by the Anti-Censorship Team and explicitly
   # intended for embedding in client software.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Bridge maintenance guide
+  # ---------------------------------------------------------------------------
+  # WHERE:   https://bridges.torproject.org/ (select obfs4 or snowflake)
+  #          or email bridges@torproject.org with "get transport obfs4" in body.
+  # HOW:     Replace the bridge lines below with the new descriptors.  Each
+  #          line is a single string in Tor's "Bridge" format.  For snowflake,
+  #          update the structured attrs and the broker URL / fronts / ICE list.
+  # WHEN:    Review at every NAILS OS release.  Replace sooner if Tor Browser
+  #          ships a newer default set (check tor-browser-build.git
+  #          projects/common/bridges_list.*) or if users report connection
+  #          failures indicating bridges are blocked or offline.
+  # LAST UPDATED: 2025-10-01 (from Tor Browser 14.x pt_config.json)
   # ---------------------------------------------------------------------------
 
   # obfs4 bridges (7) — most stable transport, simple TCP obfuscation.
@@ -163,7 +182,7 @@ in {
               # Tor UID: redirect DNS to a real resolver so PTs (snowflake)
               # can resolve the broker before any Tor circuit exists.
               # Other tor traffic (bridge connections) goes directly.
-              meta skuid $tor_uid udp dport 53 dnat to 9.9.9.9:53
+              meta skuid $tor_uid udp dport 53 dnat to ${quad9}:53
               meta skuid $tor_uid return
 
               meta skuid $clearnet_uid return
