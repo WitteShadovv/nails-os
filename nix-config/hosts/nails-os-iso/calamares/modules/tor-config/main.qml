@@ -7,6 +7,7 @@ Page {
     id: torConfigPage
 
     property bool torEnabled: true
+    property bool useBridges: false
 
     onTorEnabledChanged: {
         if (typeof calamaresWidget !== "undefined" && calamaresWidget !== null) {
@@ -14,8 +15,15 @@ Page {
         }
     }
 
+    onUseBridgesChanged: {
+        if (typeof calamaresWidget !== "undefined" && calamaresWidget !== null) {
+            calamaresWidget.set_use_bridges(useBridges);
+        }
+    }
+
     Component.onCompleted: {
         torEnabled = true;
+        useBridges = false;
     }
 
     Rectangle {
@@ -185,7 +193,7 @@ Page {
                         }
                     }
 
-                    // Privacy indicator
+                    // Privacy indicator with accessible text label
                     RowLayout {
                         Layout.topMargin: 4
                         spacing: 6
@@ -207,9 +215,44 @@ Page {
                             color: "#2cb67d"
                         }
                         Text {
-                            text: qsTr("Maximum")
+                            text: qsTr("High Privacy")
                             font.pixelSize: 11
                             color: "#2cb67d"
+                        }
+                    }
+
+                    // --- Tor bridges toggle ---
+                    RowLayout {
+                        Layout.topMargin: 4
+                        spacing: 8
+                        visible: torRadio.checked
+
+                        CheckBox {
+                            id: bridgesCheckBox
+                            checked: false
+                            onCheckedChanged: {
+                                useBridges = checked;
+                            }
+                        }
+
+                        ColumnLayout {
+                            spacing: 4
+
+                            Text {
+                                text: qsTr("Use Tor bridges (for censored networks)")
+                                font.pixelSize: 12
+                                font.bold: true
+                                color: "#e0e0e0"
+                            }
+
+                            Text {
+                                visible: bridgesCheckBox.checked
+                                text: qsTr("Bridges disguise your Tor traffic so it is harder to detect. Enable this if Tor is blocked in your country or network.")
+                                font.pixelSize: 11
+                                color: "#aaaacc"
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
                         }
                     }
                 }
@@ -355,7 +398,7 @@ Page {
                         }
                     }
 
-                    // Privacy indicator
+                    // Privacy indicator with accessible text label
                     RowLayout {
                         Layout.topMargin: 4
                         spacing: 6
@@ -377,7 +420,7 @@ Page {
                             color: "#444466"
                         }
                         Text {
-                            text: qsTr("Reduced")
+                            text: qsTr("Reduced Privacy")
                             font.pixelSize: 11
                             color: "#e6a817"
                         }
