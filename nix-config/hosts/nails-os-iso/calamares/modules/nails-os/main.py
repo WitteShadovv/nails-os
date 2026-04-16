@@ -44,6 +44,8 @@ import subprocess
 
 import libcalamares
 
+QUAD9_DNS = "9.9.9.9"
+
 _ = gettext.translation(
     "calamares-python",
     localedir=libcalamares.utils.gettext_path(),
@@ -118,6 +120,8 @@ def _calamares_deobscure(s):
     Characters with unicode value <= 0x21 are left as-is;
     all others are mapped to (0x1001F - codepoint).
     """
+    if not s:
+        return ""
     result = []
     for ch in s:
         cp = ord(ch)
@@ -203,8 +207,8 @@ def get_initrd_modules():
         ]:
             if mod in loaded:
                 modules.append(mod)
-    except Exception:
-        pass
+    except Exception as e:
+        libcalamares.utils.debug("Failed to read lsmod output: {}".format(str(e)))
     for mod in ["ahci", "sd_mod", "ata_piix"]:
         if mod not in modules:
             modules.append(mod)
@@ -364,26 +368,22 @@ def make_hardware_config(
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# Step functions — each handles one phase of the installation.
+#
+# Return convention:
+#   None          → success
+#   (str, str)    → error tuple (title, message) for Calamares
+#   dict          → success with data to pass to subsequent steps
 # ---------------------------------------------------------------------------
 
 
-def run():
-    global status
+def copy_flake(root, target_nixos):
+    """Copy the NAILS OS flake from /etc/nixos into the target root.
 
-    gs = libcalamares.globalstorage
-    root = gs.value("rootMountPoint")
-
-    if not root:
-        return (_("Installation error"), _("rootMountPoint is not set."))
-
-    target_nixos = os.path.join(root, "etc", "nixos")
-
-    # ------------------------------------------------------------------
-    # 1. Copy the NAILS OS flake into the target
-    # ------------------------------------------------------------------
-    status = _("Copying NAILS OS configuration")
-    libcalamares.job.setprogress(0.05)
+    Creates the required directory structure under *target_nixos* and copies
+    the live ISO's /etc/nixos tree into it, ensuring all files are writable
+    so subsequent steps can modify them.
+    """
     libcalamares.utils.debug("Copying /etc/nixos -> {}".format(target_nixos))
 
     try:
@@ -396,12 +396,20 @@ def run():
     except RuntimeError as e:
         return (_("Failed to copy NAILS OS configuration"), str(e))
 
-    # ------------------------------------------------------------------
-    # 2. Detect partition layout from globalStorage
-    # ------------------------------------------------------------------
-    status = _("Detecting partition layout")
-    libcalamares.job.setprogress(0.10)
+    return None
 
+
+def detect_partitions(gs, root):
+    """Detect partition layout, LUKS devices, and UUIDs from globalStorage.
+
+    Examines the partition list provided by Calamares, identifies the boot
+    and LUKS root devices, validates that encryption is present, and resolves
+    all required UUIDs.
+
+    Returns a dict on success with keys:
+        efi_mode, boot_uuid, luks_uuid, luks_passphrase, grub_disk_device
+    Returns (str, str) error tuple on failure.
+    """
     partitions = gs.value("partitions") or []
     libcalamares.utils.debug("partitions from globalStorage: {}".format(partitions))
 
@@ -537,9 +545,9 @@ def run():
                 for n in nodes:
                     if n.get("mountpoint") == target_boot_mp:
                         return "/dev/" + n["name"]
-                    result = scan_boot(n.get("children") or [])
-                    if result:
-                        return result
+                    found = scan_boot(n.get("children") or [])
+                    if found:
+                        return found
                 return None
 
             boot_device = scan_boot(data.get("blockdevices", []))
@@ -620,12 +628,24 @@ def run():
             "BIOS mode: GRUB disk device = {}".format(grub_disk_device)
         )
 
-    # ------------------------------------------------------------------
-    # 3. Write hardware-configuration.nix
-    # ------------------------------------------------------------------
-    status = _("Writing hardware configuration")
-    libcalamares.job.setprogress(0.20)
+    return {
+        "efi_mode": efi_mode,
+        "boot_uuid": boot_uuid,
+        "luks_uuid": luks_uuid,
+        "luks_passphrase": luks_passphrase,
+        "grub_disk_device": grub_disk_device,
+    }
 
+
+def write_hardware_config(
+    target_nixos, boot_uuid, luks_uuid, efi_mode, grub_disk_device
+):
+    """Generate and write hardware-configuration.nix and boot-mode.nix.
+
+    Produces hardware-configuration.nix with the detected UUIDs and
+    impermanence filesystem layout, and boot-mode.nix with the appropriate
+    bootloader configuration (systemd-boot for EFI, GRUB for BIOS).
+    """
     initrd_modules = get_initrd_modules()
     libcalamares.utils.debug("initrd modules: {}".format(initrd_modules))
 
@@ -642,9 +662,7 @@ def run():
     except RuntimeError as e:
         return (_("Failed to write hardware configuration"), str(e))
 
-    # ------------------------------------------------------------------
-    # 3b. Write boot-mode.nix (consumed by hosts/nails-os/default.nix)
-    # ------------------------------------------------------------------
+    # Write boot-mode.nix (consumed by hosts/nails-os/default.nix)
     if efi_mode:
         boot_mode_nix = (
             "# Written by the Calamares installer — EFI boot mode.\n"
@@ -679,12 +697,24 @@ def run():
     except RuntimeError as e:
         return (_("Failed to write boot mode configuration"), str(e))
 
+    return None
+
+
+def write_user_config(gs, target_nixos, efi_mode):
+    """Generate and write all user/system configuration files.
+
+    Writes hostname.nix, user credentials (secrets.nix + .passwd),
+    locale.nix, network-mode.nix (if Tor disabled), shell-history-mode.nix
+    (if history enabled), and home-persistence-mode.nix (if full persistence).
+
+    Returns a dict with keys 'username' and 'home_persistence_full' on success
+    (needed by later steps), or (str, str) error tuple on failure.
+    """
+    global status
+
     # ------------------------------------------------------------------
     # 4. Write hostname.nix
     # ------------------------------------------------------------------
-    status = _("Configuring hostname")
-    libcalamares.job.setprogress(0.25)
-
     raw_hostname = gs.value("hostname") or "nails-os"
     hostname = re.sub(r"[^a-zA-Z0-9\-]", "-", raw_hostname)
     hostname = re.sub(r"-{2,}", "-", hostname).strip("-").lower()
@@ -813,7 +843,9 @@ def run():
             "{ lib, ... }:\n"
             "{\n"
             "  nailsOs.tor.enable = false;\n"
-            '  networking.nameservers = lib.mkForce [ "9.9.9.9" "149.112.112.112" ];\n'
+            '  networking.nameservers = lib.mkForce [ "'
+            + QUAD9_DNS
+            + '" "149.112.112.112" ];\n'
             '  networking.networkmanager.dns = lib.mkForce "default";\n'
             "}\n"
         )
@@ -854,7 +886,7 @@ def run():
             "# Written by the Calamares installer — user chose to enable shell history.\n"
             "{ lib, ... }:\n"
             "{\n"
-            "  nailsOs.shellHistory.disable = false;\n"
+            "  nailsOs.shellHistory.enable = true;\n"
             "}\n"
         )
 
@@ -916,6 +948,20 @@ def run():
             "Home persistence selective (default) — no home-persistence-mode.nix written"
         )
 
+    return {
+        "username": username,
+        "home_persistence_full": home_persistence_full,
+    }
+
+
+def run_nixos_install(root, efi_mode, persist_root, username, home_persistence_full):
+    """Prepare the /persist directory tree and run nixos-install.
+
+    Creates the directory layout expected by impermanence on the target ext4,
+    then invokes nixos-install with the NAILS OS flake.
+
+    Returns None on success, (str, str) error tuple on failure.
+    """
     # ------------------------------------------------------------------
     # 6. Prepare the /persist directory tree
     #
@@ -932,12 +978,6 @@ def run():
     # no "persist/" subdirectory on the ext4; the ext4 root itself is mounted
     # at /persist at runtime.
     # ------------------------------------------------------------------
-    status = _("Preparing filesystem layout")
-    libcalamares.job.setprogress(0.40)
-
-    # The ext4 mount point IS the persist root at runtime.
-    persist_root = root
-
     try:
         # Create persisted directories that impermanence expects at boot.
         dirs = [
@@ -997,8 +1037,6 @@ def run():
     # ------------------------------------------------------------------
     # 7. Install NAILS OS from the flake
     # ------------------------------------------------------------------
-    status = _("Installing NAILS OS (this will take a while)")
-    libcalamares.job.setprogress(0.45)
     libcalamares.utils.debug(
         "Running nixos-install --flake {}/etc/nixos#nails-os".format(root)
     )
@@ -1043,12 +1081,18 @@ def run():
     if rc != 0:
         return (_("nixos-install failed"), output)
 
-    # ------------------------------------------------------------------
-    # 8. Fix ownership of the persisted home directory
-    # ------------------------------------------------------------------
-    status = _("Fixing home directory permissions")
-    libcalamares.job.setprogress(0.90)
+    return None
 
+
+def fix_permissions(root, persist_root, username):
+    """Fix ownership and permissions of the persisted home directory.
+
+    Reads the UID/GID for *username* from the installed system's /etc/passwd
+    and applies recursive chown + chmod 700 to the home directory backing
+    store under *persist_root*.
+
+    Returns None on success, (str, str) error tuple on failure.
+    """
     uid, gid = read_uid_gid(root, username)
     if not uid or not gid:
         return (
@@ -1066,6 +1110,103 @@ def run():
         run_cmd("chmod", "700", os.path.join(persist_root, "home", username))
     except RuntimeError as e:
         return (_("Failed to set home ownership"), str(e))
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def run():
+    global status
+
+    gs = libcalamares.globalstorage
+    root = gs.value("rootMountPoint")
+
+    if not root:
+        return (_("Installation error"), _("rootMountPoint is not set."))
+
+    target_nixos = os.path.join(root, "etc", "nixos")
+
+    # ------------------------------------------------------------------
+    # 1. Copy the NAILS OS flake into the target
+    # ------------------------------------------------------------------
+    status = _("Copying NAILS OS configuration")
+    libcalamares.job.setprogress(0.05)
+
+    result = copy_flake(root, target_nixos)
+    if result is not None:
+        return result
+
+    # ------------------------------------------------------------------
+    # 2. Detect partition layout from globalStorage
+    # ------------------------------------------------------------------
+    status = _("Detecting partition layout")
+    libcalamares.job.setprogress(0.10)
+
+    result = detect_partitions(gs, root)
+    if isinstance(result, tuple):
+        return result
+
+    efi_mode = result["efi_mode"]
+    boot_uuid = result["boot_uuid"]
+    luks_uuid = result["luks_uuid"]
+    grub_disk_device = result["grub_disk_device"]
+
+    # ------------------------------------------------------------------
+    # 3. Write hardware-configuration.nix
+    # ------------------------------------------------------------------
+    status = _("Writing hardware configuration")
+    libcalamares.job.setprogress(0.20)
+
+    result = write_hardware_config(
+        target_nixos, boot_uuid, luks_uuid, efi_mode, grub_disk_device
+    )
+    if result is not None:
+        return result
+
+    # ------------------------------------------------------------------
+    # 4–5. Write user configuration files
+    # ------------------------------------------------------------------
+    status = _("Configuring hostname")
+    libcalamares.job.setprogress(0.25)
+
+    result = write_user_config(gs, target_nixos, efi_mode)
+    if isinstance(result, tuple):
+        return result
+
+    username = result["username"]
+    home_persistence_full = result["home_persistence_full"]
+
+    # ------------------------------------------------------------------
+    # 6–7. Prepare filesystem layout and install
+    # ------------------------------------------------------------------
+    status = _("Preparing filesystem layout")
+    libcalamares.job.setprogress(0.40)
+
+    # The ext4 mount point IS the persist root at runtime.
+    persist_root = root
+
+    status = _("Installing NAILS OS (this will take a while)")
+    libcalamares.job.setprogress(0.45)
+
+    result = run_nixos_install(
+        root, efi_mode, persist_root, username, home_persistence_full
+    )
+    if result is not None:
+        return result
+
+    # ------------------------------------------------------------------
+    # 8. Fix ownership of the persisted home directory
+    # ------------------------------------------------------------------
+    status = _("Fixing home directory permissions")
+    libcalamares.job.setprogress(0.90)
+
+    result = fix_permissions(root, persist_root, username)
+    if result is not None:
+        return result
 
     # Step 9 is no longer needed: target_nixos IS persist_root/etc/nixos
     # (persist_root == root, and root is where nixos-install writes the flake).
