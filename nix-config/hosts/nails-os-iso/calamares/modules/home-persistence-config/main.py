@@ -10,36 +10,11 @@
 # nails-os exec module can read it.
 
 import configparser
-import libcalamares
+import os
+import sys
 
-try:
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QFont
-    from PySide6.QtWidgets import (
-        QWidget,
-        QVBoxLayout,
-        QHBoxLayout,
-        QLabel,
-        QRadioButton,
-        QButtonGroup,
-        QFrame,
-        QPushButton,
-        QScrollArea,
-    )
-except ImportError:
-    from PySide2.QtCore import Qt
-    from PySide2.QtGui import QFont
-    from PySide2.QtWidgets import (
-        QWidget,
-        QVBoxLayout,
-        QHBoxLayout,
-        QLabel,
-        QRadioButton,
-        QButtonGroup,
-        QFrame,
-        QPushButton,
-        QScrollArea,
-    )
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from nails_ui_common import *  # noqa: F401,F403,E402
 
 _HOME_PERSISTENCE_CONFIG_PATH = "/tmp/calamares-home-persistence-config.ini"
 
@@ -53,25 +28,6 @@ def _write_ini(full_persistence: bool) -> None:
     cp["General"] = {"fullPersistence": "true" if full_persistence else "false"}
     with open(_HOME_PERSISTENCE_CONFIG_PATH, "w") as fh:
         cp.write(fh)
-
-
-class OptionCard(QFrame):
-    """A styled card widget for displaying an option."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        self.setStyleSheet("""
-            OptionCard {
-                background-color: #222244;
-                border: 1px solid #444466;
-                border-radius: 8px;
-                padding: 12px;
-            }
-            OptionCard:hover {
-                background-color: #2a2a4e;
-            }
-        """)
 
 
 class CollapsibleSection(QWidget):

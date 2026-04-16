@@ -256,9 +256,9 @@ Page {
                                 color: "#2cb67d"
                             }
                             Text {
-                                text: qsTr("Maximum")
-                                font.pixelSize: 11
-                                color: "#2cb67d"
+                            text: qsTr("High Privacy")
+                            font.pixelSize: 11
+                            color: "#2cb67d"
                             }
                         }
                     }
@@ -461,9 +461,9 @@ Page {
                                 color: "#444466"
                             }
                             Text {
-                                text: qsTr("Reduced")
-                                font.pixelSize: 11
-                                color: "#e6a817"
+                            text: qsTr("Reduced Privacy")
+                            font.pixelSize: 11
+                            color: "#e6a817"
                             }
                         }
                     }

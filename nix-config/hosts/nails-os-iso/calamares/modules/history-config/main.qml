@@ -165,7 +165,7 @@ Page {
                             color: "#2cb67d"
                         }
                         Text {
-                            text: qsTr("Maximum")
+                            text: qsTr("High Privacy")
                             font.pixelSize: 11
                             color: "#2cb67d"
                         }
@@ -286,7 +286,7 @@ Page {
                             color: "#444466"
                         }
                         Text {
-                            text: qsTr("Reduced")
+                            text: qsTr("Reduced Privacy")
                             font.pixelSize: 11
                             color: "#e6a817"
                         }
