@@ -22,9 +22,10 @@
       ../../modules/network.nix
       ../../modules/security.nix
       ../../modules/boot.nix
-      ../../modules/storage.nix
       ../../modules/impermanence.nix
       ../../modules/tor.nix
+      ../../modules/tor-status.nix
+      ../../modules/welcome.nix
       ../../modules/shell-history.nix
       ../../modules/packages.nix
       ../../modules/users.nix
