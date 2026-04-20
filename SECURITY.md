@@ -2,7 +2,11 @@
 
 Public vulnerability policy for NAILS OS.
 
-For operational security docs (SBOM, dependency hygiene, maintainer workflow), see [`docs/security/index.md`](docs/security/index.md).
+This file is the **canonical public policy** for vulnerability reporting, support boundaries, and disclosure expectations.
+
+For the **canonical current SBOM, dependency hygiene, and vulnerability workflow docs**, start at [`docs/security/index.md`](docs/security/index.md).
+
+Historical planning context remains in [`docs/SBOM-DEPENDENCY-VULNERABILITY-ARCHITECTURE.md`](docs/SBOM-DEPENDENCY-VULNERABILITY-ARCHITECTURE.md), but that file is archival/reference material and not the current source of truth.
 
 ## Supported Versions
 
@@ -62,6 +66,7 @@ Severity is assigned in NAILS OS context (Tor routing, persistence, encryption, 
 
 ## Dependency and SBOM Policy (public summary)
 
+- Canonical current documentation hub: [`docs/security/index.md`](docs/security/index.md)
 - `nix-config/flake.lock` is the canonical dependency pinning artifact.
 - Security-relevant dependency updates are performed on a regular cadence, with an emergency path for Critical CVEs.
 - SBOM and vulnerability validation are documented in:

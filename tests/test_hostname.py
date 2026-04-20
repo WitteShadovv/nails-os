@@ -106,4 +106,6 @@ class TestHostnameLong:
         """The code doesn't truncate, but the result should still be valid."""
         result = sanitize_hostname("a" * 1000)
         assert result == "a" * 1000
-        assert all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in result)
+        assert all(
+            c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in result
+        )  # pragma: allowlist secret

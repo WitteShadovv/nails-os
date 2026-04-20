@@ -22,13 +22,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           fetch-depth: 1
           persist-credentials: false
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v17
+        uses: DeterminateSystems/nix-installer-action@21a544727d0c62386e78b4befe52d19ad12692e3  # v17
 
       - name: Run vulnerability scan
         id: scan
@@ -53,7 +53,7 @@ jobs:
           echo "high=${HIGH}" >> "$GITHUB_OUTPUT"
 
       - name: Upload vulnerability report artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: nails-os-weekly-vuln-scan-${{ github.run_id }}
           path: dist/vulnix-results.json
@@ -71,9 +71,13 @@ jobs:
           set -euo pipefail
 
           TITLE="🚨 Weekly security scan: critical vulnerabilities detected"
-          SEARCH='is:issue is:open in:title "Weekly security scan: critical vulnerabilities detected" label:security'
+          SEARCH="\"$TITLE\" in:title"
+          EXISTING_ISSUE_NUMBER="$({
+            gh issue list --repo "$REPO" --state open --search "$SEARCH" --json number,title | \
+              jq -r --arg title "$TITLE" 'map(select(.title == $title)) | .[0].number // empty'
+          })"
 
-          if gh issue list --repo "$REPO" --search "$SEARCH" --json number --jq 'length > 0' | grep -q true; then
+          if [ -n "$EXISTING_ISSUE_NUMBER" ]; then
             echo "::notice::An open weekly critical vulnerability issue already exists; skipping issue creation."
             exit 0
           fi

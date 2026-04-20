@@ -30,4 +30,4 @@ Does this change affect the threat model, Tor routing, encryption, or persistenc
 - [ ] Pre-commit hooks pass (`nixfmt`, `deadnix`, `statix`, `detect-secrets`)
 - [ ] No secrets or credentials included
 - [ ] Documentation updated (if applicable)
-- [ ] Changes are consistent with the [threat model](../../README.md#threat-model)
+- [ ] Changes are consistent with the threat model described in `README.md`

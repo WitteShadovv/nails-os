@@ -76,6 +76,10 @@ lock-check:
 pre-commit:
     pre-commit run --all-files
 
+# Fail if forbidden junk is tracked by git
+cleanliness-guard:
+    python3 .github/scripts/check_tracked_cleanliness.py
+
 # Enter development shell
 dev:
     nix develop ./nix-config

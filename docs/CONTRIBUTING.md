@@ -1,6 +1,6 @@
 # Contributing
 
-Contributor guide for NAILS OS.
+Canonical contributor guide for NAILS OS. The top-level [`../CONTRIBUTING.md`](../CONTRIBUTING.md) file is the public GitHub entry point; this document contains the full workflow and local commands.
 
 For general project overview, see [`../README.md`](../README.md).
 For architecture details, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -25,7 +25,7 @@ For architecture details, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
    ```bash
    git push origin feat/my-change
    ```
-6. **Open a Pull Request** against `main` on the upstream repository.
+6. **Open a Pull Request** against `main` on the upstream repository. GitHub provides the repository pull request template; complete the relevant sections and note any threat-model impact.
 
 ### Dev Environment Setup
 
@@ -48,6 +48,14 @@ pre-commit install
 ```
 
 Hooks include: `nixfmt` (formatting), `deadnix` (dead code), `statix` (linting), `nix-instantiate --parse` (syntax), `detect-secrets`, standard checks (trailing whitespace, YAML/JSON validation, merge conflict detection), and a full NixOS configuration evaluation.
+
+Optional local cleanliness guard (matches CI's tracked-junk check):
+
+```bash
+python3 .github/scripts/check_tracked_cleanliness.py
+```
+
+This guard checks **tracked git paths only**. Ignored local files are allowed.
 
 ### Building the ISO
 
@@ -159,6 +167,6 @@ Recommended maintenance cadence:
 
 ## Code of Conduct
 
-Contributors are expected to behave professionally and respectfully. Harassment, discrimination, and abusive behavior will not be tolerated. The maintainers reserve the right to remove contributions or ban contributors who violate these expectations.
+All participation in this project is governed by [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md).
 
-When in doubt, be kind. Assume good intent. Focus on the work.
+Be respectful, assume good intent, and keep collaboration focused on the work.
