@@ -802,8 +802,60 @@ jobs:
       # Run a selected subset of existing flake checks that cover current
       # security/privacy regressions without adding a new verification layer.
       # -----------------------------------------------------------------------
-      - name: Run selected flake checks
+      - name: Detect KVM availability for NixOS VM flake checks
+        id: detect-kvm-flake-checks
         if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+
+          echo "::group::Detect Nix system features for VM flake checks"
+
+          SYSTEM_FEATURES_JSON="$({ nix config show --json; } | jq -c '
+            .["system-features"].value // []
+            | if type == "array" then .
+              elif type == "string" then split(" ") | map(select(length > 0))
+              else []
+              end
+          ')"
+          SYSTEM_FEATURES_HUMAN="$(jq -r '
+            if length > 0 then join(", ") else "<none>" end
+          ' <<< "$SYSTEM_FEATURES_JSON")"
+
+          echo "Detected Nix system features: $SYSTEM_FEATURES_HUMAN"
+
+          if jq -e 'index("kvm") != null' <<< "$SYSTEM_FEATURES_JSON" >/dev/null; then
+            KVM_AVAILABLE=true
+          else
+            KVM_AVAILABLE=false
+          fi
+
+          echo "available=$KVM_AVAILABLE" >> "$GITHUB_OUTPUT"
+
+          if [[ "$KVM_AVAILABLE" == "true" ]]; then
+            echo "KVM-backed NixOS VM flake checks are enabled on this runner."
+            {
+              echo "## KVM-backed VM flake checks"
+              echo ""
+              echo "- Nix system features: \\`$SYSTEM_FEATURES_HUMAN\\`"
+              echo "- Result: available"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice::Skipping KVM-dependent NixOS VM flake checks because Nix system-features do not include 'kvm'. Detected: $SYSTEM_FEATURES_HUMAN"
+            {
+              echo "## KVM-backed VM flake checks"
+              echo ""
+              echo "- Nix system features: \\`$SYSTEM_FEATURES_HUMAN\\`"
+              echo "- Result: unavailable"
+              echo "- Action: skipping KVM-dependent NixOS VM flake checks on this runner"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "::endgroup::"
+
+      - name: Run selected KVM-dependent NixOS VM flake checks
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'pull_request') &&
+          steps.detect-kvm-flake-checks.outputs.available == 'true'
         run: |
           set -euo pipefail
           nix build -L \
