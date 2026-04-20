@@ -122,37 +122,6 @@ concurrency:
   group: build-iso-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  NIX_SETUP_SCRIPT: | # pragma: allowlist secret
-    set -euo pipefail
-    INSTALLER_URL='https://install.determinate.systems/nix'
-    INSTALLER_SHA256='1de1a9ddba23464d037aea82a16ca6cc800e1b06eda67c8007560ab6c56afdb7' # pragma: allowlist secret
-    NIX_INSTALLER_BINARY_ROOT='https://install.determinate.systems/nix/tag/v3.17.3'
-    TMP_DIR=$(mktemp -d)
-    trap 'rm -rf "$TMP_DIR"' EXIT
-    INSTALLER="$TMP_DIR/determinate-nix-installer.sh"
-    curl --proto '=https' --tlsv1.2 -sSf -L "$INSTALLER_URL" -o "$INSTALLER"
-    ACTUAL_SHA256=$(sha256sum "$INSTALLER" | awk '{print $1}')
-    if [ "$ACTUAL_SHA256" != "$INSTALLER_SHA256" ]; then
-      echo "Determinate installer checksum mismatch: expected $INSTALLER_SHA256 got $ACTUAL_SHA256" >&2
-      exit 1
-    fi
-    chmod 0755 "$INSTALLER"
-    NIX_INSTALLER_BINARY_ROOT="$NIX_INSTALLER_BINARY_ROOT" sh "$INSTALLER" install --no-confirm
-    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-    mkdir -p /etc/nix
-    cat > /etc/nix/nix.conf << 'NIXCONF'
-    experimental-features = nix-command flakes
-    max-jobs = auto
-    cores = 0
-    sandbox = true
-    accept-flake-config = false
-    NIXCONF
-    systemctl restart nix-daemon
-    for bin in /nix/var/nix/profiles/default/bin/*; do
-      ln -sf "$bin" /usr/local/bin/
-    done
-
 jobs:
   # ===========================================================================
   # Job 0: Run Python unit tests (lightweight, no Nix/Hetzner infrastructure)
@@ -311,7 +280,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 2: ccx33 @ hel1 (Helsinki, FI)
@@ -332,7 +300,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 3: ccx33 @ fsn1 (Falkenstein, DE)
@@ -353,7 +320,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 4: ccx23 @ nbg1 (4 dedicated vCPU, 16GB RAM, 160GB SSD)
@@ -377,7 +343,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 5: ccx23 @ hel1
@@ -402,7 +367,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 6: ccx23 @ fsn1
@@ -428,7 +392,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 7: cpx41 @ nbg1 (8 shared vCPU, 16GB RAM, 240GB SSD)
@@ -455,7 +418,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 8: cpx41 @ hel1
@@ -483,7 +445,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 9: cpx41 @ fsn1 (last resort)
@@ -512,7 +473,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Determine which combo succeeded and export its outputs
@@ -694,6 +654,20 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      # -----------------------------------------------------------------------
+      # Install Nix inside the job so the toolchain is provisioned in the same
+      # execution environment that runs subsequent nix commands.
+      # -----------------------------------------------------------------------
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@21a544727d0c62386e78b4befe52d19ad12692e3  # v17
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
 
       # -----------------------------------------------------------------------
       # Verify Nix installation
