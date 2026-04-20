@@ -42,6 +42,7 @@ Configure these in **Settings → Secrets and variables → Actions → Secrets*
 |---|---|---|
 | `PERSONAL_ACCESS_TOKEN` | Hetzner self-hosted runner registration | Fine-grained PAT with the repository access needed by the workflow |
 | `HCLOUD_TOKEN` | Hetzner provisioning and cleanup | Read/write Hetzner Cloud API token |
+| `HCLOUD_SSH_KEY_ID` | Hetzner runner provisioning | Preferred/canonical location. Must be the **numeric Hetzner SSH key ID**, not the key name |
 | `R2_ENDPOINT` | R2 publication | Required for stable ISO upload |
 | `R2_ACCESS_KEY_ID` | R2 publication | Required for stable ISO upload |
 | `R2_SECRET_ACCESS_KEY` | R2 publication | Required for stable ISO upload |
@@ -52,10 +53,12 @@ Configure these in **Settings → Secrets and variables → Actions → Variable
 
 | Variable | Required for | Notes |
 |---|---|---|
-| `HCLOUD_SSH_KEY_ID` | Hetzner runner provisioning | Must be the **numeric Hetzner SSH key ID**, not the key name |
+| `HCLOUD_SSH_KEY_ID` | Hetzner runner provisioning | Backward-compatible fallback only. If both secret and variable are set, CI prefers the secret. Must be the **numeric Hetzner SSH key ID**, not the key name |
 | `R2_BUCKET_NAME` | R2 upload steps | Bucket used for `latest/` and `stable/` publication paths |
 | `R2_PUBLIC_URL` | Release notes and download links | Public base URL used in GitHub release notes |
 | `HETZNER_CUMULATIVE_COST_EUR` | Monthly cost tracking | Auto-managed by CI; stores month and cumulative total |
+
+For Hetzner runner provisioning, configure `HCLOUD_SSH_KEY_ID` as an Actions **secret** whenever possible. Existing variable-based setups remain supported as a fallback for backward compatibility.
 
 ## Cost controls and cleanup
 

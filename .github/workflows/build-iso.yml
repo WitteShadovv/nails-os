@@ -78,6 +78,8 @@ on:
         required: true
       HCLOUD_TOKEN:
         required: true
+      HCLOUD_SSH_KEY_ID:
+        required: false
       R2_ENDPOINT:
         required: false
       R2_ACCESS_KEY_ID:
@@ -181,6 +183,8 @@ jobs:
     needs: python-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      HCLOUD_SSH_KEY_ID_EFFECTIVE: ${{ secrets.HCLOUD_SSH_KEY_ID || vars.HCLOUD_SSH_KEY_ID }}
     outputs:
       label: ${{ steps.determine-combo.outputs.label }}
       server_id: ${{ steps.determine-combo.outputs.server_id }}
@@ -188,12 +192,10 @@ jobs:
       location: ${{ steps.determine-combo.outputs.location }}
     steps:
       - name: Validate provisioning configuration
-        env:
-          HCLOUD_SSH_KEY_ID: ${{ vars.HCLOUD_SSH_KEY_ID }}
         run: | # pragma: allowlist secret
           set -euo pipefail
-          if [ -z "${HCLOUD_SSH_KEY_ID:-}" ]; then
-            echo "::error::HCLOUD_SSH_KEY_ID repository variable is required for Hetzner runner provisioning."
+          if [ -z "${HCLOUD_SSH_KEY_ID_EFFECTIVE:-}" ]; then
+            echo "::error::HCLOUD_SSH_KEY_ID is required for Hetzner runner provisioning. Configure it as a repository secret (preferred) or repository variable."
             exit 1
           fi
           echo "HCLOUD_SSH_KEY_ID is configured for Hetzner runner provisioning."
@@ -308,7 +310,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -329,7 +331,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -350,7 +352,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -374,7 +376,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -399,7 +401,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -425,7 +427,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -452,7 +454,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -480,7 +482,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
@@ -509,7 +511,7 @@ jobs:
           runner_wait: '120'
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          ssh_key: ${{ vars.HCLOUD_SSH_KEY_ID }}
+          ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
           pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
