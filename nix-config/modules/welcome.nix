@@ -51,7 +51,8 @@ let
         mkdir -p "$(dirname "$FLAG")"
         touch "$FLAG"
   '';
-in {
+in
+{
   config = {
     environment.systemPackages = [ pkgs.zenity ];
 

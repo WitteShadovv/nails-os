@@ -15,11 +15,21 @@
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, impermanence, home-manager, ... }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      impermanence,
+      home-manager,
+      ...
+    }:
     let
       # Architectures for tooling outputs (devShells, etc.).
       # ISO builds and NixOS VM integration tests remain x86_64-linux only.
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
 
       # Primary system for ISO builds, NixOS configurations, and VM tests.
@@ -40,8 +50,10 @@
         nails-os-iso = nixpkgs.lib.nixosSystem {
           inherit system;
           specialArgs = { inherit impermanence; };
-          modules =
-            [ ./hosts/nails-os-iso home-manager.nixosModules.home-manager ];
+          modules = [
+            ./hosts/nails-os-iso
+            home-manager.nixosModules.home-manager
+          ];
         };
       };
 
@@ -56,12 +68,12 @@
         target = nixosConfigurations.nails-os-iso.config.system.build.toplevel;
         ignoredCvesFile = ./security/ignored-cves.json;
       };
-    in {
+    in
+    {
       inherit nixosConfigurations;
 
       packages.${system} = {
-        nails-os-iso =
-          self.nixosConfigurations.nails-os-iso.config.system.build.isoImage;
+        nails-os-iso = self.nixosConfigurations.nails-os-iso.config.system.build.isoImage;
         inherit sbom;
         options-doc = import ./options-doc.nix {
           inherit pkgs;
@@ -82,9 +94,12 @@
       };
 
       # ── Item 7 + 36: Developer shell with linting, formatting, and test tools ─
-      devShells = forAllSystems (sys:
-        let p = nixpkgs.legacyPackages.${sys};
-        in {
+      devShells = forAllSystems (
+        sys:
+        let
+          p = nixpkgs.legacyPackages.${sys};
+        in
+        {
           default = p.mkShell {
             packages = with p; [
               nixfmt-rfc-style
@@ -97,28 +112,36 @@
               python3Packages.pytest
             ];
           };
-        });
+        }
+      );
 
       # ── Item 2 + 36: NixOS VM integration tests ───────────────────────────────
       # VM tests require KVM and are x86_64-linux only.  The vulnix check is
       # also x86_64-only because it references the ISO closure.
-      checks = forAllSystems (sys:
+      checks = forAllSystems (
+        sys:
         nixpkgs.lib.optionalAttrs (sys == "x86_64-linux") {
-          vulnix = pkgs.runCommand "nails-vulnix-check" {
-            nativeBuildInputs = [ vulnixScan ];
-          } ''
-            export HOME="$TMPDIR"
-            mkdir -p "$HOME"
-            nails-vulnix-scan --help > /dev/null
-            touch "$out"
-          '';
+          vulnix =
+            pkgs.runCommand "nails-vulnix-check"
+              {
+                nativeBuildInputs = [ vulnixScan ];
+              }
+              ''
+                export HOME="$TMPDIR"
+                mkdir -p "$HOME"
+                nails-vulnix-scan --help > /dev/null
+                touch "$out"
+              '';
 
           # 1. Boot test — system reaches multi-user.target with security
           #    hardening modules active.
           boot = pkgs.testers.runNixOSTest {
             name = "nails-boot";
             nodes.machine = {
-              imports = [ ./modules/security.nix ./modules/shell-history.nix ];
+              imports = [
+                ./modules/security.nix
+                ./modules/shell-history.nix
+              ];
               users.users.amnesia = {
                 isNormalUser = true;
                 uid = 1000;
@@ -139,8 +162,11 @@
           tor-enforcement = pkgs.testers.runNixOSTest {
             name = "nails-tor-enforcement";
             nodes.machine = {
-              imports =
-                [ ./modules/tor.nix ./modules/network.nix ./modules/users.nix ];
+              imports = [
+                ./modules/tor.nix
+                ./modules/network.nix
+                ./modules/users.nix
+              ];
               nailsOs.tor.useBridges = false;
               services.timesyncd.enable = nixpkgs.lib.mkForce false;
             };
@@ -162,8 +188,11 @@
           dns-leak-prevention = pkgs.testers.runNixOSTest {
             name = "nails-dns-leak-prevention";
             nodes.machine = {
-              imports =
-                [ ./modules/tor.nix ./modules/network.nix ./modules/users.nix ];
+              imports = [
+                ./modules/tor.nix
+                ./modules/network.nix
+                ./modules/users.nix
+              ];
               nailsOs.tor.useBridges = false;
               services.timesyncd.enable = nixpkgs.lib.mkForce false;
             };
@@ -189,7 +218,10 @@
               fileSystems."/ephemeral" = {
                 device = "tmpfs";
                 fsType = "tmpfs";
-                options = [ "mode=755" "size=64M" ];
+                options = [
+                  "mode=755"
+                  "size=64M"
+                ];
               };
             };
             testScript = ''
@@ -235,8 +267,11 @@
           unsafe-browser = pkgs.testers.runNixOSTest {
             name = "nails-unsafe-browser";
             nodes.machine = {
-              imports =
-                [ ./modules/tor.nix ./modules/network.nix ./modules/users.nix ];
+              imports = [
+                ./modules/tor.nix
+                ./modules/network.nix
+                ./modules/users.nix
+              ];
               nailsOs.tor.useBridges = false;
               services.timesyncd.enable = nixpkgs.lib.mkForce false;
             };
@@ -281,6 +316,7 @@
               machine.succeed("cryptsetup luksClose testcrypt")
             '';
           };
-        });
+        }
+      );
     };
 }

@@ -33,13 +33,16 @@ let
     ".gnupg"
   ];
 
-  fullHome = [{
-    directory = "/home/${user}";
-    inherit user;
-    group = "users";
-    mode = "u=rwx,g=,o=";
-  }];
-in {
+  fullHome = [
+    {
+      directory = "/home/${user}";
+      inherit user;
+      group = "users";
+      mode = "u=rwx,g=,o=";
+    }
+  ];
+in
+{
   imports = [ ./home-persistence.nix ];
 
   config = {
@@ -60,7 +63,8 @@ in {
         "/var/lib/systemd/backlight" # Used for screen brightness
         "/var/lib/systemd/rfkill" # Used for bluetooth state
         "/var/lib/bluetooth" # Persist bluetooth connections
-      ] ++ (if selective then selectiveDirs else fullHome);
+      ]
+      ++ (if selective then selectiveDirs else fullHome);
 
       files = [
         "/etc/machine-id" # Needed for various things like systemd logs

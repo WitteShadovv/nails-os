@@ -23,49 +23,52 @@ let
     modules = modules ++ [
       # Provide a minimal base so modules that reference config.users,
       # config.services, etc. don't fail during option discovery.
-      ({ lib, ... }: {
-        options = {
-          users = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
+      (
+        { lib, ... }:
+        {
+          options = {
+            users = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
+            services = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
+            environment = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
+            programs = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
+            networking = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
+            security = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
+            boot = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
+            system = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+            };
           };
-          services = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
-          };
-          environment = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
-          };
-          programs = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
-          };
-          networking = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
-          };
-          security = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
-          };
-          boot = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
-          };
-          system = lib.mkOption {
-            type = lib.types.attrs;
-            default = { };
-          };
-        };
-        config._module.check = false;
-      })
+          config._module.check = false;
+        }
+      )
     ];
   };
 
   # Filter to only nailsOs.* options.
-  nailsOpts = pkgs.lib.filterAttrs (name: _: pkgs.lib.hasPrefix "nailsOs" name)
-    eval.options;
+  nailsOpts = pkgs.lib.filterAttrs (name: _: pkgs.lib.hasPrefix "nailsOs" name) eval.options;
 
   optionsDoc = pkgs.nixosOptionsDoc { options = nailsOpts; };
-in optionsDoc.optionsCommonMark
+in
+optionsDoc.optionsCommonMark

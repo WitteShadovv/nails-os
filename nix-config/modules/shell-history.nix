@@ -1,4 +1,5 @@
-{ config, lib, ... }: {
+{ config, lib, ... }:
+{
   options.nailsOs.shellHistory = {
     enable = lib.mkOption {
       type = lib.types.bool;

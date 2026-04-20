@@ -25,9 +25,14 @@ repos:
 
       - id: nixfmt
         name: nixfmt
-        entry: nixfmt
+        entry: nix
         language: system
         files: \.nix$
+        args:
+          - develop
+          - ./nix-config
+          - -c
+          - nixfmt
 
       - id: nix-syntax-check
         name: nix syntax check

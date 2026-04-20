@@ -5,17 +5,16 @@
     assertions = [
       {
         assertion = pkgs ? obfs4;
-        message =
-          "obfs4 is required for Tor censorship circumvention (pluggable transports) but is not available in nixpkgs. This would silently break censorship circumvention.";
+        message = "obfs4 is required for Tor censorship circumvention (pluggable transports) but is not available in nixpkgs. This would silently break censorship circumvention.";
       }
       {
         assertion = pkgs ? snowflake;
-        message =
-          "snowflake is required for Tor censorship circumvention (pluggable transports) but is not available in nixpkgs. This would silently break censorship circumvention.";
+        message = "snowflake is required for Tor censorship circumvention (pluggable transports) but is not available in nixpkgs. This would silently break censorship circumvention.";
       }
     ];
 
-    environment.systemPackages = with pkgs;
+    environment.systemPackages =
+      with pkgs;
       [
         tor-browser
         thunderbird

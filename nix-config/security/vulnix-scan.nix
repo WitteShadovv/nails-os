@@ -1,8 +1,18 @@
-{ pkgs, lib, target, ignoredCvesFile ? null }:
+{
+  pkgs,
+  lib,
+  target,
+  ignoredCvesFile ? null,
+}:
 
 pkgs.writeShellApplication {
   name = "nails-vulnix-scan";
-  runtimeInputs = with pkgs; [ nix vulnix jq coreutils ];
+  runtimeInputs = with pkgs; [
+    nix
+    vulnix
+    jq
+    coreutils
+  ];
 
   text = ''
         set -euo pipefail
@@ -28,9 +38,7 @@ pkgs.writeShellApplication {
         TARGET="''${1:-${target}}"
         OUTPUT_FILE="''${2:-vulnix-results.json}"
         OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
-        IGNORED_CVES_FILE="${
-          if ignoredCvesFile != null then toString ignoredCvesFile else ""
-        }"
+        IGNORED_CVES_FILE="${if ignoredCvesFile != null then toString ignoredCvesFile else ""}"
 
         mkdir -p "$OUTPUT_DIR"
 

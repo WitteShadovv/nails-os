@@ -1,4 +1,5 @@
-{ lib, ... }: {
+{ lib, ... }:
+{
   imports = lib.optional (builtins.pathExists ./secrets.nix) ./secrets.nix;
 
   users = {
@@ -16,7 +17,12 @@
         uid = 1000;
         description = "Amnesia";
         home = "/home/amnesia";
-        extraGroups = [ "wheel" "networkmanager" "video" "audio" ];
+        extraGroups = [
+          "wheel"
+          "networkmanager"
+          "video"
+          "audio"
+        ];
       };
 
       clearnet = {
@@ -31,6 +37,8 @@
       };
     };
 
-    groups.clearnet = { gid = 399; };
+    groups.clearnet = {
+      gid = 399;
+    };
   };
 }
