@@ -1,52 +1,87 @@
-# Code of Conduct
+# Contributor Covenant Code of Conduct
 
-NAILS OS is a public technical project. We want the repository to be a respectful, useful place for collaboration.
+## Our Pledge
 
-## Expected Behavior
+We as members, contributors, and leaders pledge to make participation in our
+community a harassment-free experience for everyone, regardless of age, body
+size, visible or invisible disability, ethnicity, sex characteristics, gender
+identity and expression, level of experience, education, socio-economic status,
+nationality, personal appearance, race, caste, color, religion, or sexual
+identity and orientation.
 
-- Be respectful, patient, and constructive.
-- Assume good intent and discuss disagreements in technical terms.
-- Welcome contributors with different backgrounds and experience levels.
-- Keep feedback specific, actionable, and relevant to the work.
-- Respect privacy and security boundaries, especially for a project with a security-sensitive scope.
+We pledge to act and interact in ways that contribute to an open, welcoming,
+diverse, inclusive, and healthy community.
 
-## Unacceptable Behavior
+## Our Standards
 
-- Harassment, intimidation, discrimination, or personal attacks.
-- Trolling, baiting, dogpiling, or sustained hostile argument.
-- Sexualized language or imagery.
-- Doxxing, publishing private information, or pressuring others to disclose it.
-- Deliberately disruptive behavior in issues, pull requests, reviews, or other project spaces.
-- Knowingly misrepresenting security claims, test results, or project state.
+Examples of behavior that contributes to a positive environment for our
+community include:
+
+* Demonstrating empathy and kindness toward other people
+* Being respectful of differing opinions, viewpoints, and experiences
+* Giving and gracefully accepting constructive feedback
+* Accepting responsibility and apologizing to those affected by our mistakes,
+  and learning from the experience
+* Focusing on what is best not just for us as individuals, but for the overall
+  community
+
+Examples of unacceptable behavior include:
+
+* The use of sexualized language or imagery, and sexual attention or advances of
+  any kind
+* Trolling, insulting or derogatory comments, and personal or political attacks
+* Public or private harassment
+* Publishing others' private information, such as a physical or email address,
+  without their explicit permission
+* Other conduct which could reasonably be considered inappropriate in a
+  professional setting
+
+## Enforcement Responsibilities
+
+Community leaders are responsible for clarifying and enforcing our standards of
+acceptable behavior and will take appropriate and fair corrective action in
+response to any behavior that they deem inappropriate, threatening, offensive,
+or harmful.
+
+Community leaders have the right and responsibility to remove, edit, or reject
+comments, commits, code, wiki edits, issues, and other contributions that are
+not aligned to this Code of Conduct, and will communicate reasons for moderation
+decisions when appropriate.
 
 ## Scope
 
-This code of conduct applies to:
-
-- GitHub issues, pull requests, reviews, and discussions related to this repository
-- Project documentation and contribution discussions
-- Other public or private interactions that are clearly representing this project
-
-## Reporting
-
-If you experience or witness unacceptable behavior, contact the repository maintainer privately via GitHub:
-
-- <https://github.com/WitteShadovv>
-
-If you cannot safely share details in public, do **not** post sensitive information in an issue. You may open a minimal issue requesting private follow-up instead.
-
-If the report involves the maintainer, or GitHub private contact is not workable, use GitHub's own reporting/safety tools as an additional channel. NAILS OS does not currently have a separate conduct team or alternate governance body.
-
-> Security vulnerabilities are not code-of-conduct reports. Use the private channels in [`SECURITY.md`](SECURITY.md).
+This Code of Conduct applies within all community spaces, and also applies when
+an individual is officially representing the community in public spaces.
+Examples of representing our community include using an official email address,
+posting via an official social media account, or acting as an appointed
+representative at an online or offline event.
 
 ## Enforcement
 
-The maintainer may take any action needed to protect the project and its participants, including:
+Instances of abusive, harassing, or otherwise unacceptable behavior may be
+reported privately to the maintainer at **security@nails.run** or via GitHub:
 
-- requesting changes in behavior
-- editing or removing comments or contributions
-- locking conversations
-- rejecting contributions
-- temporarily or permanently blocking participation
+- <https://github.com/WitteShadovv>
 
-Enforcement decisions will be made in the interest of community safety and project health.
+Please use a clear subject line such as `Code of Conduct report` so the report
+can be triaged appropriately. This mailbox is also used for security reports,
+and conduct reports are handled separately from vulnerability disclosures.
+
+If the report involves the maintainer, or private contact through the project is
+not workable, use GitHub's own reporting and safety tools as an additional
+channel.
+
+All complaints will be reviewed and investigated promptly and fairly.
+
+All community leaders are obligated to respect the privacy and security of the
+reporter of any incident, and to handle shared details as discreetly as
+practical during review and follow-up.
+
+## Attribution
+
+This Code of Conduct is adapted from the [Contributor Covenant][homepage],
+version 2.1, available at
+[https://www.contributor-covenant.org/version/2/1/code_of_conduct.html][v2.1].
+
+[homepage]: https://www.contributor-covenant.org
+[v2.1]: https://www.contributor-covenant.org/version/2/1/code_of_conduct.html

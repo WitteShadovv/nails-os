@@ -2,7 +2,13 @@
 
 All notable changes to NAILS OS will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
+uses [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for commit history.
+
+GitHub Releases currently publish automated **prerelease** ISO builds from `main`, often using
+`latest-*` tags. This changelog remains the source of truth for ongoing project changes during the
+current alpha phase. Numbered sections document project history, but they do not imply a separate
+currently supported stable release line unless a release note says so.
 
 ## [Unreleased]
 
@@ -29,6 +35,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - GNOME desktop with curated privacy toolkit
 - IPv6 disabled to prevent Tor bypass
 
+### Changed
+- Clarified public-facing documentation so NAILS OS is described consistently as alpha software with
+  current GitHub Releases treated as prerelease ISO publications from `main`.
+- Tightened security, support, and contribution language so public claims stay bounded by the
+  documented threat model and maintainer review.
+- Added clearer explanation of the relationship between NAILS OS and the separate NAILS CLI.
+
 ### Fixed
 - EFI mount path aligned with the Calamares NixOS mount module
 - Chooser icon sizing and scrollbar visibility in the installer
@@ -38,7 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - World-writable build directory in the installer
 - Username locked to `amnesia` via Calamares preset
 
-## [0.1.0] — Initial Development
+## [0.1.0] — Initial development snapshot
 
 Barebones version of NAILS OS — NixOS-based amnesic live system with Tor routing.
 

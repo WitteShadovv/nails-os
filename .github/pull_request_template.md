@@ -23,7 +23,7 @@ Describe how you tested these changes:
 
 ## Security Considerations
 
-Does this change affect the threat model, Tor routing, encryption, or persistence boundaries? If so, describe.
+Does this change affect the threat model, Tor/Direct routing behavior, encryption, persistence boundaries, boot behavior, or release/operator guidance? If so, describe.
 
 ## Checklist
 
@@ -31,3 +31,4 @@ Does this change affect the threat model, Tor routing, encryption, or persistenc
 - [ ] No secrets or credentials included
 - [ ] Documentation updated (if applicable)
 - [ ] Changes are consistent with the threat model described in `README.md`
+- [ ] Public-facing language stays consistent with the repository's alpha-stage status and documented scope

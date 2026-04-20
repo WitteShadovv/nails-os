@@ -1,32 +1,46 @@
 # Support
 
-This document explains where to ask for help and how to route reports for NAILS OS.
+NAILS OS is maintained through this repository. Use GitHub issues for actionable bug reports, focused feature proposals, and documentation improvements. The fastest way to get useful help is to provide a concise, reproducible report that stays within the project's documented scope.
 
-## Choose the Right Path
+## Where to Get Help
 
-| Need | Use | Notes |
-|---|---|---|
-| Security vulnerability | [`SECURITY.md`](SECURITY.md) | **Do not** open a public issue. Use private reporting. |
-| Bug or regression | [Open a bug report](https://github.com/WitteShadovv/nails-os/issues/new?template=bug_report.md) | Include reproduction steps, ISO version/date, boot mode, and logs if available. |
-| Feature request | [Open a feature request](https://github.com/WitteShadovv/nails-os/issues/new?template=feature_request.md) | Explain the use case and any security/privacy tradeoffs. |
-| Contributing help | [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Use these for setup, build, test, and PR workflow guidance. |
-| Question about current repository behavior or docs | [Open an issue](https://github.com/WitteShadovv/nails-os/issues/new/choose) | Be specific about what you expected, what you saw, and which release or docs page you used. |
+| Need | Best channel |
+| --- | --- |
+| Reproducible bug in NAILS OS | [GitHub Issues](https://github.com/WitteShadovv/nails-os/issues) using the bug report template |
+| Feature request or documentation improvement | [GitHub Issues](https://github.com/WitteShadovv/nails-os/issues) using the appropriate template |
+| Security vulnerability | `security@nails.run` or GitHub private advisory — see [SECURITY.md](SECURITY.md) |
+| Contributor workflow or repository setup question | [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) |
+| Question about current repository behavior or docs | Review the README and existing issues first; if you find a concrete product or documentation gap, open an issue with specifics |
 
-If you are unsure which public route applies, start with the [issue chooser](https://github.com/WitteShadovv/nails-os/issues/new/choose) for non-security topics and use [`SECURITY.md`](SECURITY.md) for private vulnerability disclosure.
+If your issue is actually about the separate **NAILS** hidden-environment CLI rather than this installable operating system, report it in the sibling `nails` repository instead.
 
-## Before Opening an Issue
+## Before You Open an Issue
 
-- Check whether the issue or request already exists.
-- Re-test on a current build or with the latest documented workflow if practical.
-- Gather the exact command, error, log output, or screenshot that demonstrates the problem.
-- Include environment details that matter for this project, such as boot mode (UEFI/BIOS) and network mode (Tor/Direct).
+Please:
 
-## Security vs. General Support
+1. Search existing issues for duplicates.
+2. Confirm that the behavior is in scope for this repository.
+3. Check the latest published prerelease, or note the exact commit if you are testing unreleased code.
+4. Gather useful diagnostics such as:
+   - ISO version or release tag
+   - boot mode (`UEFI` or `BIOS`)
+   - network mode (`Tor` or `Direct`)
+   - relevant logs, screenshots, or installer output
+   - hardware or virtualization details needed to reproduce the problem
 
-- Use [`SECURITY.md`](SECURITY.md) **only** for vulnerability disclosure and sensitive security reports.
-- Do **not** use the security contact for general troubleshooting, feature requests, or usage questions.
-- Do **not** post exploit details or unpatched vulnerability reports in public issues.
+When reporting problems, avoid posting passwords, recovery material, private keys, or other sensitive operational data.
 
-## Support Expectations
+## Security Reports
 
-NAILS OS is currently an **alpha-stage** project and support is best-effort. Clear, reproducible reports are much easier to act on than broad or speculative ones.
+Do **not** report suspected vulnerabilities in public issues or discussions.
+
+Use the private reporting path in [SECURITY.md](SECURITY.md). If you are unsure whether an issue is security-sensitive, err on the side of private reporting.
+
+## Support Scope
+
+- Reports are triaged based on reproducibility, user impact, and the information provided.
+- We may ask for clarification or sanitized diagnostics before triage is complete.
+- The latest published prerelease line is the primary target for fixes and documentation updates during the current alpha phase.
+- We do not provide private consulting or troubleshooting for custom deployments, forks, unsupported environments, or third-party integrations.
+
+NAILS OS is currently **alpha** software and support is best-effort. Clear, reproducible reports are the fastest way to get useful help.

@@ -9,9 +9,20 @@
 
 </div>
 
-> **A privacy-oriented NixOS distribution with a tmpfs root, a mandatory encrypted system volume, and Tor as the default network mode.**
+> **An installable amnesic NixOS desktop system with a live ISO, graphical installer, encrypted persistence, and Tor as the default network mode.**
 
-NAILS OS is a bootable ISO with a graphical installer. It installs an amnesic desktop system that runs from RAM, keeps most persistent state on encrypted storage, and defaults to Tor-routed networking. In UEFI mode, boot files still live on a small unencrypted EFI system partition. The project is built with Nix for auditability and reproducibility, and the security claims are scoped to the documented threat model.
+NAILS OS is a privacy-oriented NixOS distribution delivered as a bootable live ISO with a graphical installer. It installs an amnesic desktop system that runs from RAM, keeps most persistent state on encrypted storage, and defaults to Tor-routed networking. In UEFI mode, boot files still live on a small unencrypted EFI system partition.
+
+The project is built with Nix for auditability and reproducibility. Its security and privacy claims are bounded by the documented threat model, the selected install mode, and the way the system is operated.
+
+## Related projects
+
+NAILS OS and [NAILS](https://github.com/WitteShadovv/nails) are related but distinct projects:
+
+- **NAILS OS** is the installable NixOS distribution in this repository: live ISO, graphical installer, amnesic desktop defaults, encrypted persistence, and network-mode choices.
+- **NAILS** is a separate NixOS-only CLI for layering a hidden environment over a believable decoy system.
+
+NAILS OS does **not** replace the NAILS CLI workflow, and NAILS does **not** replace this operating system distribution. Use the repository that matches the system model you actually want.
 
 ## What NAILS OS does
 
@@ -22,14 +33,20 @@ NAILS OS is a bootable ISO with a graphical installer. It installs an amnesic de
 - **Selective persistence by default** — documents and selected secrets persist; browser profiles, caches, and several activity metadata stores do not.
 - **Shell history disabled by default** — you can opt in during installation.
 - **Fixed account naming** — the installed username is always `amnesia` and the display name is `Amnesia`; you choose the password during installation.
-- **Public build artifacts** — releases include checksums and build metadata; public releases also support GitHub attestation verification for `checksums.txt`.
+- **Public build artifacts** — published release entries include checksums and build metadata; some releases may also provide GitHub attestation verification for `checksums.txt`.
 
 Additional safeguards include AppArmor, disabled IPv6, MAC address randomization, no swap, and a curated desktop app set focused on privacy and everyday use.
 
 ## Current status
 
 > [!WARNING]
-> NAILS OS is **alpha-stage** software. Test it carefully before relying on it.
+> NAILS OS is **alpha** security software. Test your exact hardware, boot mode, network mode,
+> and persistence choices before relying on it.
+
+- GitHub Releases currently publish automated **prerelease** ISO builds from `main`.
+- There is no separate stable release line yet.
+- Interfaces, installer choices, and operational guidance may still change between alpha releases.
+- Security claims are bounded by the documented threat model and by the checks you perform on your own setup.
 
 - **Architecture:** x86_64
 - **Boot modes:** UEFI and legacy BIOS
@@ -40,7 +57,7 @@ Additional safeguards include AppArmor, disabled IPv6, MAC address randomization
 
 If you are evaluating NAILS OS, try it in a VM first:
 
-1. Download the latest release ISO.
+1. Download the latest published prerelease ISO.
 2. Boot it in a UEFI VM with at least 4 GB RAM.
 3. Install with the defaults unless you have a specific reason to change them.
 4. Review the persistence and boot notes below before using real hardware.
@@ -167,7 +184,9 @@ Under the default **selective persistence** mode, shell history files still do *
 
 ## Download and verify
 
-Download releases from the [Releases](https://github.com/WitteShadovv/nails-os/releases) page.
+Download releases from the canonical [GitHub Releases](https://github.com/WitteShadovv/nails-os/releases) page.
+
+Current GitHub Releases are automated **prerelease** ISO publications from `main`, so use the newest published prerelease unless you are reproducing a specific revision.
 
 Release notes link to the ISO hosted on Cloudflare R2 and include:
 
@@ -187,7 +206,7 @@ For public releases, you can also verify the GitHub attestation for `checksums.t
 gh attestation verify checksums.txt --repo WitteShadovv/nails-os
 ```
 
-For current SBOM, dependency, and vulnerability workflow documentation, start at [`docs/security/index.md`](docs/security/index.md). Public vulnerability disclosure remains in [`SECURITY.md`](SECURITY.md).
+For current SBOM, dependency, and vulnerability workflow documentation, start at [`docs/security/index.md`](docs/security/index.md). Private vulnerability reporting and disclosure policy remain in [`SECURITY.md`](SECURITY.md).
 
 ## Documentation map
 
@@ -196,10 +215,20 @@ For current SBOM, dependency, and vulnerability workflow documentation, start at
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Technical system design and installer behavior |
 | [`docs/BIOS-SECURITY.md`](docs/BIOS-SECURITY.md) | BIOS / legacy boot limitations and rationale |
 | [`docs/security/index.md`](docs/security/index.md) | Canonical hub for SBOM, dependency hygiene, and vulnerability workflow docs |
-| [`SECURITY.md`](SECURITY.md) | Public vulnerability reporting policy |
+| [`SECURITY.md`](SECURITY.md) | Private vulnerability reporting and disclosure policy |
 | [`SUPPORT.md`](SUPPORT.md) | Bug reports, feature requests, and support routing |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contributor entry point |
+| [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Full contributor workflow and local commands |
 | [`docs/CI-OPERATIONS.md`](docs/CI-OPERATIONS.md) | Maintainer CI / release / publication operations |
+
+## Project status
+
+NAILS OS is actively maintained and currently released as **alpha** software.
+
+- GitHub Releases currently publish prerelease ISO builds from `main` rather than a separate stable channel.
+- Installer behavior, persistence defaults, and operator guidance may still change between alpha releases.
+- Use it only after testing your exact hardware, boot mode, network mode, and recovery procedure.
+- Security claims are bounded by the documented threat model and by the checks you perform on your own setup.
 
 ## For contributors and maintainers
 
@@ -213,11 +242,13 @@ For current SBOM, dependency, and vulnerability workflow documentation, start at
 - [Tor Project](https://www.torproject.org)
 - [nix-community/impermanence](https://github.com/nix-community/impermanence)
 
-NAILS has been developed with AI-assisted tooling for drafting code, tests, and documentation. All security-relevant design decisions, code changes, and published documentation remain the responsibility of the maintainer and are intended to be reviewed and validated before release.
+NAILS OS has been developed with AI-assisted tooling for drafting code, tests, and documentation. All security-relevant design decisions, code changes, and published documentation remain the responsibility of the maintainer and are intended to be reviewed and validated before release.
 
-## License
+## License and disclaimer
 
 NAILS OS is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
 > [!CAUTION]
-> This software is provided without warranties. Use it only after testing it in your own threat environment.
+> This software is provided for educational, testing, and security research purposes. It comes
+> with no warranty, and it should not be treated as a guarantee of anonymity, amnesia, or
+> forensic resistance in any specific threat environment.

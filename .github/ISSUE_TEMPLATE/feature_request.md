@@ -1,19 +1,36 @@
 ---
-name: Feature Request
-about: Suggest a feature or improvement for NAILS OS
-title: "[Feature] "
+name: Feature request
+about: Propose a focused improvement for NAILS OS
+title: "feat: "
 labels: enhancement
 assignees: ''
 ---
 
-## Description
+> **Template note:** Use this form for concrete product or documentation improvements. For suspected vulnerabilities, do **not** open a public issue; follow [SECURITY.md](../../SECURITY.md). For support expectations and issue scope, see [SUPPORT.md](../../SUPPORT.md).
 
-A clear description of the feature you'd like to see.
+## Summary
 
-## Use Case
+Describe the improvement you want to see.
 
-Why is this feature needed? What problem does it solve?
+## Problem or use case
 
-## Proposed Solution
+What user problem, operational gap, or workflow limitation does this address?
 
-How do you think this could be implemented? Consider the security and privacy implications.
+## Proposed approach
+
+Describe the behavior you would like from NAILS OS. Keep proposals focused and concrete.
+
+## Threat model or safety impact
+
+Does this change any security assumptions, persistence boundaries, routing guarantees, or user safety expectations?
+
+## Alternatives considered
+
+Describe any alternative approaches, workarounds, or reasons to keep the current behavior.
+
+## Additional context
+
+- Relevant installer step, module, or workflow:
+- Related issue or discussion:
+- Constraints or edge cases to consider:
+- Tradeoffs or compatibility concerns:

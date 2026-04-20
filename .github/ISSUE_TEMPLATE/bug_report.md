@@ -1,37 +1,57 @@
 ---
-name: Bug Report
-about: Report a bug in NAILS OS
-title: "[Bug] "
+name: Bug report
+about: Report a reproducible bug in NAILS OS
+title: "bug: "
 labels: bug
 assignees: ''
 ---
 
-## Description
+> **Security notice:** Do **not** report vulnerabilities here. For suspected security issues, follow [SECURITY.md](../../SECURITY.md) and use a private reporting channel.
 
-A clear description of the bug.
+> **Support note:** For usage questions or setup guidance, review [SUPPORT.md](../../SUPPORT.md) before opening an issue.
 
-## Steps to Reproduce
+## Summary
+
+Describe the problem clearly and concisely.
+
+## Steps to reproduce
 
 1.
 2.
 3.
 
-## Expected Behavior
+## Expected behavior
 
-What you expected to happen.
+What did you expect to happen?
 
-## Actual Behavior
+## Actual behavior
 
-What actually happened. Include error messages, logs, or screenshots if applicable.
+What happened instead? Include the exact error text if available.
 
-## System Information
+## Environment
 
-- **NAILS OS version / ISO date:**
-- **Boot mode:** UEFI / BIOS
-- **Network mode:** Tor / Direct
-- **Hardware:** (CPU, RAM, relevant peripherals)
-- **Installation method:** GUI installer / Manual
+- NAILS OS version / ISO date:
+- Boot mode: UEFI / BIOS
+- Network mode: Tor / Direct
+- Installation method:
+- Hardware or VM details:
+- Checked against latest published prerelease: yes / no
 
-## Additional Context
+## Diagnostics
 
-Any other information that might help diagnose the issue.
+If relevant, include sanitized logs, screenshots, or installer output.
+
+Paste sanitized output here:
+
+```text
+
+```
+
+## Additional context
+
+- Exact command, setting, or workflow involved:
+- Does this regress behavior that previously worked?
+- Does this happen consistently or intermittently?
+- Are there known workarounds?
+
+Please remove passwords, recovery material, private keys, and other sensitive data before submitting.
