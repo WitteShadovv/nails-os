@@ -54,7 +54,7 @@ let
   # broker; without them it falls back to stale compiled-in defaults and exits
   # immediately after PT initialisation (the "died in state Completed" loop).
   mkSnowflakeBridge = { addr, fingerprint, url, fronts, ice
-    , utlsImitate ? "hellorandomizedalpn" }:
+    , utlsImitate ? "hellorandomizedalpn", }:
     lib.concatStringsSep " " [
       "snowflake ${addr} ${fingerprint}"
       "fingerprint=${fingerprint}"
@@ -80,7 +80,8 @@ let
     "stun:stun.nextcloud.com:443"
   ];
   snowflakeBridges = map mkSnowflakeBridge [
-    { # snowflake-01
+    {
+      # snowflake-01
       addr = "192.0.2.3:80";
       fingerprint =
         "2B280B23E1107BB62ABFC40DDCC8824814F80A72"; # pragma: allowlist secret
@@ -88,7 +89,8 @@ let
       fronts = commonFronts;
       ice = commonIce;
     }
-    { # snowflake-02 (separate capacity, same broker)
+    {
+      # snowflake-02 (separate capacity, same broker)
       addr = "192.0.2.4:80";
       fingerprint =
         "8838024498816A039FCBBAB14E6F40A0843051FA"; # pragma: allowlist secret
