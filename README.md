@@ -44,7 +44,8 @@ Additional safeguards include AppArmor, disabled IPv6, MAC address randomization
 > and persistence choices before relying on it.
 
 - GitHub Releases currently publish automated **prerelease** ISO builds from `main`.
-- There is no separate stable release line yet.
+- Maintainers can also cut tagged releases for specific versions; that is separate from the rolling prerelease stream.
+- There is no separate LTS or backport-supported stable maintenance line yet.
 - Interfaces, installer choices, and operational guidance may still change between alpha releases.
 - Security claims are bounded by the documented threat model and by the checks you perform on your own setup.
 
@@ -186,7 +187,7 @@ Under the default **selective persistence** mode, shell history files still do *
 
 Download releases from the canonical [GitHub Releases](https://github.com/WitteShadovv/nails-os/releases) page.
 
-Current GitHub Releases are automated **prerelease** ISO publications from `main`, so use the newest published prerelease unless you are reproducing a specific revision.
+Current GitHub Releases include automated **prerelease** ISO publications from `main`. Tagged releases may also be published for specific versions, so use the newest supported release that matches what you are trying to evaluate or reproduce.
 
 Release notes link to the ISO hosted on Cloudflare R2 and include:
 
@@ -225,7 +226,7 @@ For current SBOM, dependency, and vulnerability workflow documentation, start at
 
 NAILS OS is actively maintained and currently released as **alpha** software.
 
-- GitHub Releases currently publish prerelease ISO builds from `main` rather than a separate stable channel.
+- GitHub Releases currently publish rolling prerelease ISO builds from `main`; tagged releases may also be published for specific versions.
 - Installer behavior, persistence defaults, and operator guidance may still change between alpha releases.
 - Use it only after testing your exact hardware, boot mode, network mode, and recovery procedure.
 - Security claims are bounded by the documented threat model and by the checks you perform on your own setup.

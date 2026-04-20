@@ -6,9 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 uses [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for commit history.
 
 GitHub Releases currently publish automated **prerelease** ISO builds from `main`, often using
-`latest-*` tags. This changelog remains the source of truth for ongoing project changes during the
-current alpha phase. Numbered sections document project history, but they do not imply a separate
-currently supported stable release line unless a release note says so.
+`latest-*` tags. Tagged releases are also supported for versioned snapshots. This changelog remains
+the source of truth for ongoing project changes during the current alpha phase. Numbered sections
+document project history, but they do not by themselves define a separate long-term supported
+release line.
 
 ## [Unreleased]
 

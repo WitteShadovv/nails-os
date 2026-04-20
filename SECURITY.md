@@ -11,7 +11,7 @@ This policy applies to security issues in the NAILS OS repository and its offici
 - the live ISO, graphical installer, and NixOS configuration in this repository
 - NAILS OS-specific persistence, routing, and boot-path behavior implemented here
 - official release metadata such as published checksums and build metadata
-- official GitHub prerelease ISO publications from this repository
+- official GitHub release publications from this repository, including automated prereleases from `main` and tagged releases
 
 This policy does **not** cover:
 
@@ -29,10 +29,11 @@ NAILS OS is currently released as **alpha** software. Security fixes are applied
 | Version | Status | Security support |
 | --- | --- | --- |
 | Latest GitHub prerelease from `main` | Current alpha ISO publication | Security fixes are applied here first |
+| Latest tagged release, when one exists | Versioned release snapshot | Supported until replaced by a newer supported release |
 | Earlier GitHub prereleases in the current alpha series | Superseded | Not supported |
 | Locally modified or forked builds | Unofficial | Not supported |
 
-There is no separate stable or LTS release line yet. Because the project is pre-1.0, we recommend upgrading to the latest published prerelease instead of relying on backported fixes.
+There is no separate LTS or backport-supported stable maintenance line yet. Because the project is pre-1.0, we recommend upgrading to the newest supported prerelease or tagged release instead of relying on backported fixes.
 
 ## Reporting a Vulnerability
 
