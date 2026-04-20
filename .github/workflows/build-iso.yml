@@ -122,6 +122,37 @@ concurrency:
   group: build-iso-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NIX_SETUP_SCRIPT: | # pragma: allowlist secret
+    set -euo pipefail
+    INSTALLER_URL='https://install.determinate.systems/nix'
+    INSTALLER_SHA256='1de1a9ddba23464d037aea82a16ca6cc800e1b06eda67c8007560ab6c56afdb7' # pragma: allowlist secret
+    NIX_INSTALLER_BINARY_ROOT='https://install.determinate.systems/nix/tag/v3.17.3'
+    TMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TMP_DIR"' EXIT
+    INSTALLER="$TMP_DIR/determinate-nix-installer.sh"
+    curl --proto '=https' --tlsv1.2 -sSf -L "$INSTALLER_URL" -o "$INSTALLER"
+    ACTUAL_SHA256=$(sha256sum "$INSTALLER" | awk '{print $1}')
+    if [ "$ACTUAL_SHA256" != "$INSTALLER_SHA256" ]; then
+      echo "Determinate installer checksum mismatch: expected $INSTALLER_SHA256 got $ACTUAL_SHA256" >&2
+      exit 1
+    fi
+    chmod 0755 "$INSTALLER"
+    NIX_INSTALLER_BINARY_ROOT="$NIX_INSTALLER_BINARY_ROOT" sh "$INSTALLER" install --no-confirm
+    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+    mkdir -p /etc/nix
+    cat > /etc/nix/nix.conf << 'NIXCONF'
+    experimental-features = nix-command flakes
+    max-jobs = auto
+    cores = 0
+    sandbox = true
+    accept-flake-config = false
+    NIXCONF
+    systemctl restart nix-daemon
+    for bin in /nix/var/nix/profiles/default/bin/*; do
+      ln -sf "$bin" /usr/local/bin/
+    done
+
 jobs:
   # ===========================================================================
   # Job 0: Run Python unit tests (lightweight, no Nix/Hetzner infrastructure)
@@ -280,6 +311,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 2: ccx33 @ hel1 (Helsinki, FI)
@@ -300,6 +332,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 3: ccx33 @ fsn1 (Falkenstein, DE)
@@ -320,6 +353,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 4: ccx23 @ nbg1 (4 dedicated vCPU, 16GB RAM, 160GB SSD)
@@ -343,6 +377,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 5: ccx23 @ hel1
@@ -367,6 +402,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 6: ccx23 @ fsn1
@@ -392,6 +428,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 7: cpx41 @ nbg1 (8 shared vCPU, 16GB RAM, 240GB SSD)
@@ -418,6 +455,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 8: cpx41 @ hel1
@@ -445,6 +483,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 9: cpx41 @ fsn1 (last resort)
@@ -473,6 +512,7 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
+          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Determine which combo succeeded and export its outputs
@@ -656,18 +696,58 @@ jobs:
           persist-credentials: false
 
       # -----------------------------------------------------------------------
-      # Install Nix inside the job so the toolchain is provisioned in the same
-      # execution environment that runs subsequent nix commands.
+      # Activate the Nix installation provisioned during Hetzner runner
+      # creation. On ephemeral self-hosted runners the installation exists on
+      # disk, but each job still needs an explicit PATH/environment activation.
       # -----------------------------------------------------------------------
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@21a544727d0c62386e78b4befe52d19ad12692e3  # v17
-        with:
-          extra-conf: |
-            experimental-features = nix-command flakes
-            max-jobs = auto
-            cores = 0
-            sandbox = true
-            accept-flake-config = false
+      - name: Activate provisioned Nix
+        run: |
+          set -euo pipefail
+
+          NIX_BIN_DIR="/nix/var/nix/profiles/default/bin"
+          NIX_BIN="$NIX_BIN_DIR/nix"
+          NIX_PROFILE_SCRIPT="/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
+
+          echo "::group::Activate provisioned Nix"
+
+          if [ ! -x "$NIX_BIN" ]; then
+            echo "::error::Provisioned Nix is missing or not executable at $NIX_BIN"
+            echo "PATH=$PATH"
+            echo "Listing /nix/var/nix/profiles/default for diagnostics:"
+            ls -la /nix/var/nix/profiles/default 2>/dev/null || true
+            echo "Listing $NIX_BIN_DIR for diagnostics:"
+            ls -la "$NIX_BIN_DIR" 2>/dev/null || true
+            echo "Listing profile.d for diagnostics:"
+            ls -la /nix/var/nix/profiles/default/etc/profile.d 2>/dev/null || true
+            exit 1
+          fi
+
+          if [ -f "$NIX_PROFILE_SCRIPT" ]; then
+            . "$NIX_PROFILE_SCRIPT"
+          else
+            echo "::notice::Nix profile script not found at $NIX_PROFILE_SCRIPT; continuing with PATH activation only."
+          fi
+
+          export PATH="$NIX_BIN_DIR:$PATH"
+          echo "$NIX_BIN_DIR" >> "$GITHUB_PATH"
+
+          if ! command -v nix >/dev/null 2>&1; then
+            echo "::error::nix is still unavailable after activation"
+            echo "PATH=$PATH"
+            exit 1
+          fi
+
+          if ! command -v nix-store >/dev/null 2>&1; then
+            echo "::error::nix-store is still unavailable after activation"
+            echo "PATH=$PATH"
+            exit 1
+          fi
+
+          echo "Activated nix: $(command -v nix)"
+          echo "Activated nix-store: $(command -v nix-store)"
+          nix --version
+          nix-store --version
+          echo "::endgroup::"
 
       # -----------------------------------------------------------------------
       # Verify Nix installation
