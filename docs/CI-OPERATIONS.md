@@ -8,7 +8,7 @@ For the public project overview, see [`../README.md`](../README.md).
 
 | Workflow | Purpose |
 |---|---|
-| `.github/workflows/build-iso.yml` | Build the ISO, run reproducibility checks, upload publication artifacts, and publish rolling `latest-*` pre-releases from `main` |
+| `.github/workflows/build-iso.yml` | Build the ISO, run reproducibility checks, upload publication artifacts, publish rolling `latest-*` pre-releases from `main`, and gate privileged PR Hetzner runs behind the `hetzner-pr` environment approval flow |
 | `.github/workflows/release.yml` | Build a stable release from a `v*` tag or manual dispatch and create the GitHub Release |
 | `.github/workflows/hetzner-cleanup.yml` | Daily failsafe cleanup for orphaned Hetzner servers |
 | `.github/workflows/security-scan.yml` | Weekly vulnerability scan |
@@ -22,6 +22,14 @@ For the public project overview, see [`../README.md`](../README.md).
 - Built by `build-iso.yml`
 - Published as GitHub pre-releases tagged `latest-<commit>`
 - ISO is hosted on Cloudflare R2; the GitHub release carries metadata assets and links
+
+### Pull requests to `main`
+
+- Privileged Hetzner-backed PR ISO builds now run via `pull_request_target`, not `pull_request`
+- The workflow first stops at a metadata-only approval job bound to the GitHub Actions environment `hetzner-pr`
+- That approval job does **not** check out or execute PR code
+- After approval, a trusted GitHub-hosted resolver job fetches the current PR head repository/ref/SHA from the GitHub API and passes that exact target into the Hetzner-backed jobs
+- Hetzner-backed jobs check out the exact approved SHA with `persist-credentials: false` and verify `HEAD` before executing PR code
 
 ### Stable releases
 
@@ -59,6 +67,15 @@ Configure these in **Settings → Secrets and variables → Actions → Variable
 | `HETZNER_CUMULATIVE_COST_EUR` | Monthly cost tracking | Auto-managed by CI; stores month and cumulative total |
 
 For Hetzner runner provisioning, configure `HCLOUD_SSH_KEY_ID` as an Actions **secret** whenever possible. Existing variable-based setups remain supported as a fallback for backward compatibility.
+
+## Required GitHub environment for PR Hetzner builds
+
+Create a repository environment named **`hetzner-pr`** in **Settings → Environments** and configure it with:
+
+- **Required reviewers**: the maintainers allowed to approve privileged Hetzner-backed PR builds
+- Optional deployment branch restrictions if you want approvals limited to the default-branch workflow context
+
+The `hetzner-pr` environment is approval-only for PR runs. It does not need environment secrets; the workflow continues to use explicitly mapped repository secrets after approval.
 
 ## Cost controls and cleanup
 
