@@ -2271,3 +2271,80 @@ jobs:
           server_id: ${{ needs.create-runner.outputs.server_id }}
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+
+  hetzner-iso-result:
+    name: Hetzner ISO Result
+    needs:
+      - resolve-run-context
+      - python-tests
+      - create-runner
+      - build-and-verify
+      - publish-latest
+      - delete-runner
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve workflow outcome
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_VALUE: ${{ github.ref }}
+          RUN_MODE: ${{ needs.resolve-run-context.outputs.run_mode }}
+          TRUST_REASON: ${{ needs.resolve-run-context.outputs.reason }}
+          RESOLVE_RESULT: ${{ needs.resolve-run-context.result }}
+          PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}
+          CREATE_RUNNER_RESULT: ${{ needs.create-runner.result }}
+          BUILD_RESULT: ${{ needs.build-and-verify.result }}
+          PUBLISH_RESULT: ${{ needs.publish-latest.result }}
+          DELETE_RUNNER_RESULT: ${{ needs.delete-runner.result }}
+        run: |
+          set -euo pipefail
+
+          {
+            cat <<'EOF'
+          ## Hetzner ISO workflow result
+
+          | Job | Result |
+          |---|---|
+          EOF
+            printf '| Run mode | `%s` |\n' "${RUN_MODE:-unknown}"
+            printf '| Resolve trusted run context | `%s` |\n' "${RESOLVE_RESULT}"
+            printf '| Python unit tests | `%s` |\n' "${PYTHON_TESTS_RESULT}"
+            printf '| Create Hetzner runner | `%s` |\n' "${CREATE_RUNNER_RESULT}"
+            printf '| Build and verify ISO | `%s` |\n' "${BUILD_RESULT}"
+            printf '| Publish rolling latest release | `%s` |\n' "${PUBLISH_RESULT}"
+            printf '| Delete Hetzner runner | `%s` |\n' "${DELETE_RUNNER_RESULT}"
+            printf '\n%s\n' "${TRUST_REASON}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${RESOLVE_RESULT}" != 'success' ]]; then
+            echo "::error::Failed to resolve a trusted checkout target."
+            exit 1
+          fi
+
+          if [[ "${PYTHON_TESTS_RESULT}" != 'success' ]]; then
+            echo "::error::Python unit tests did not complete successfully."
+            exit 1
+          fi
+
+          if [[ "${CREATE_RUNNER_RESULT}" != 'success' ]]; then
+            echo "::error::Hetzner runner provisioning did not complete successfully."
+            exit 1
+          fi
+
+          if [[ "${BUILD_RESULT}" != 'success' ]]; then
+            echo "::error::The Hetzner ISO build-and-verify job did not complete successfully."
+            exit 1
+          fi
+
+          if [[ "${EVENT_NAME}" == 'push' && "${GITHUB_REF_VALUE}" == 'refs/heads/main' && "${PUBLISH_RESULT}" != 'success' ]]; then
+            echo "::error::Push-to-main ISO lane did not complete its publish-latest job successfully."
+            exit 1
+          fi
+
+          if [[ "${DELETE_RUNNER_RESULT}" != 'success' ]]; then
+            echo "::error::Hetzner runner cleanup did not complete successfully."
+            exit 1
+          fi
+
+          echo "Hetzner ISO workflow completed successfully."

@@ -1,4 +1,4 @@
-name: Build NAILS OS ISO (PR approval gate)
+name: Build NAILS OS ISO (PR)
 
 on:
   pull_request_target:
@@ -7,13 +7,8 @@ on:
       - opened
       - reopened
       - synchronize
+      - edited
       - ready_for_review
-    paths:
-      - 'nix-config/**'
-      - '.github/workflows/build-iso.yml'
-      - '.github/workflows/build-iso-pr.yml'
-      - '.github/workflows/release.yml'
-      - '.pre-commit-config.yaml'
 
 permissions:
   contents: read
@@ -24,8 +19,149 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  assess-relevance:
+    name: Assess Hetzner ISO PR relevance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.assess.outputs.relevant }}
+      matched_files: ${{ steps.assess.outputs.matched_files }}
+      changed_files_count: ${{ steps.assess.outputs.changed_files_count }}
+    steps:
+      - name: Evaluate PR file relevance without checkout
+        id: assess
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 <<'PY'
+          import fnmatch
+          import json
+          import os
+          import urllib.request
+
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          token = os.environ["GITHUB_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          pr_number = os.environ["PR_NUMBER"]
+          output_path = os.environ["GITHUB_OUTPUT"]
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+
+          relevant_patterns = [
+              "nix-config/**",
+              ".github/workflows/build-iso.yml",
+              ".github/workflows/build-iso-pr.yml",
+              ".github/workflows/release.yml",
+              ".pre-commit-config.yaml",
+          ]
+
+          if not pr_number.isdigit():
+              raise SystemExit(f"Invalid pull request number: {pr_number!r}")
+
+          def write_output(name, value):
+              value = "" if value is None else str(value)
+              with open(output_path, "a", encoding="utf-8") as fh:
+                  if "\n" in value:
+                      fh.write(f"{name}<<EOF\n{value}\nEOF\n")
+                  else:
+                      fh.write(f"{name}={value}\n")
+
+          def api_get(path):
+              request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          pr = api_get(f"/repos/{repo}/pulls/{pr_number}")
+          if pr["base"]["ref"] != "main":
+              raise SystemExit(f"PR #{pr_number} no longer targets main.")
+
+          changed_files = []
+          page = 1
+          while True:
+              page_items = api_get(f"/repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}")
+              if not page_items:
+                  break
+              changed_files.extend(page_items)
+              if len(page_items) < 100:
+                  break
+              page += 1
+
+          matched_files = []
+          for item in changed_files:
+              filename = item["filename"]
+              previous_filename = item.get("previous_filename") or ""
+
+              candidate_paths = [filename]
+              if previous_filename:
+                  candidate_paths.append(previous_filename)
+
+              matching_paths = [
+                  path
+                  for path in candidate_paths
+                  if any(fnmatch.fnmatch(path, pattern) for pattern in relevant_patterns)
+              ]
+              if matching_paths:
+                  matched_files.append(
+                      {
+                          "filename": filename,
+                          "previous_filename": previous_filename,
+                          "status": item.get("status", "unknown"),
+                          "matching_paths": matching_paths,
+                      }
+                  )
+
+          relevant = "true" if matched_files else "false"
+          reason = (
+              "Relevant changes detected; this PR must pass through the native Hetzner approval gate."
+              if matched_files
+              else "No Hetzner ISO-relevant changes detected; approval and Hetzner provisioning are skipped."
+          )
+
+          write_output("relevant", relevant)
+          matched_files_output = []
+          for item in matched_files:
+              line = f"{item['status']}: {item['filename']}"
+              if item["previous_filename"]:
+                  line += f" (previously {item['previous_filename']})"
+              line += f" [matched: {', '.join(item['matching_paths'])}]"
+              matched_files_output.append(line)
+
+          write_output("matched_files", "\n".join(matched_files_output))
+          write_output("changed_files_count", str(len(changed_files)))
+
+          with open(summary_path, "a", encoding="utf-8") as summary:
+              summary.write("## Hetzner ISO PR relevance\n\n")
+              summary.write("This job is metadata-only. It does not check out or execute PR code.\n\n")
+              summary.write("| Property | Value |\n")
+              summary.write("|---|---|\n")
+              summary.write(f"| PR | `#{pr_number}` |\n")
+              summary.write(f"| Changed files inspected | `{len(changed_files)}` |\n")
+              summary.write(f"| Relevant | `{relevant}` |\n")
+              summary.write(f"| Reason | {reason} |\n")
+              summary.write("| Rename-aware matching | `true` |\n")
+              summary.write("| Relevant path patterns | `")
+              summary.write("`, `".join(relevant_patterns))
+              summary.write("` |\n")
+              if matched_files:
+                  summary.write("\n### Matching files\n\n")
+                  for item in matched_files:
+                      summary.write(f"- `{item['status']}: {item['filename']}`")
+                      if item["previous_filename"]:
+                          summary.write(f" (previously `{item['previous_filename']}`)")
+                      summary.write(f" — matched `{'`, `'.join(item['matching_paths'])}`\n")
+          PY
+
   approve-pr:
     name: Await Hetzner PR approval
+    needs: assess-relevance
+    if: needs.assess-relevance.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -114,7 +250,8 @@ jobs:
 
   build-iso:
     name: Build NAILS OS ISO
-    needs: approve-pr
+    needs: [assess-relevance, approve-pr]
+    if: needs.assess-relevance.outputs.relevant == 'true' && needs.approve-pr.result == 'success'
     uses: ./.github/workflows/build-iso.yml
     permissions:
       contents: write
@@ -136,3 +273,66 @@ jobs:
       R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+  hetzner-iso-pr-result:
+    name: Hetzner ISO PR Result
+    needs: [assess-relevance, approve-pr, build-iso]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve PR workflow outcome
+        env:
+          RELEVANCE_RESULT: ${{ needs.assess-relevance.result }}
+          RELEVANT: ${{ needs.assess-relevance.outputs.relevant }}
+          MATCHED_FILES: ${{ needs.assess-relevance.outputs.matched_files }}
+          CHANGED_FILES_COUNT: ${{ needs.assess-relevance.outputs.changed_files_count }}
+          APPROVAL_RESULT: ${{ needs.approve-pr.result }}
+          BUILD_RESULT: ${{ needs.build-iso.result }}
+        run: |
+          set -euo pipefail
+
+          {
+            cat <<'EOF'
+          ## Hetzner ISO PR workflow result
+
+          | Job | Result |
+          |---|---|
+          EOF
+            printf '| Assess PR relevance | `%s` |\n' "${RELEVANCE_RESULT}"
+            printf '| Relevant changes detected | `%s` |\n' "${RELEVANT}"
+            printf '| Changed files inspected | `%s` |\n' "${CHANGED_FILES_COUNT:-0}"
+            printf '| PR approval gate | `%s` |\n' "${APPROVAL_RESULT}"
+            printf '| Reusable Hetzner ISO lane | `%s` |\n' "${BUILD_RESULT}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${MATCHED_FILES:-}" ]; then
+            {
+              printf '\n### Relevant files\n\n'
+              while IFS= read -r file; do
+                [ -n "$file" ] && printf -- '- `%s`\n' "$file"
+              done <<< "${MATCHED_FILES}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ "${RELEVANCE_RESULT}" != 'success' ]]; then
+            echo "::error::Failed to determine whether this PR is relevant to the Hetzner ISO lane."
+            exit 1
+          fi
+
+          if [[ "${RELEVANT}" != 'true' ]]; then
+            echo "PR is not relevant to the Hetzner ISO lane. Stable required check passes without approval or Hetzner provisioning."
+            exit 0
+          fi
+
+          if [[ "${APPROVAL_RESULT}" != 'success' ]]; then
+            echo "::error::Relevant PR did not complete the hetzner-pr environment approval gate successfully."
+            exit 1
+          fi
+
+          if [[ "${BUILD_RESULT}" != 'success' ]]; then
+            echo "::error::Relevant PR did not complete the Hetzner ISO lane successfully."
+            exit 1
+          fi
+
+          echo "Relevant PR completed the Hetzner ISO lane successfully."
