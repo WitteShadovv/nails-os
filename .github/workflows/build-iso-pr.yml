@@ -53,6 +53,7 @@ jobs:
               ".github/workflows/build-iso-pr.yml",
               ".github/workflows/build-iso-main.yml",
               ".github/workflows/build-iso-pr-safe.yml",
+              ".github/workflows/build-iso-pr-approved.yml",
               ".github/workflows/build-iso-pr-trusted.yml",
               ".github/workflows/release.yml",
               ".pre-commit-config.yaml",

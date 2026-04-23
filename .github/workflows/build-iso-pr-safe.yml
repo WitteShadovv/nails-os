@@ -151,7 +151,12 @@ jobs:
                   break
               page += 1
 
-          changed_paths = [item["filename"] for item in changed_files]
+          executable_statuses = {"added", "copied", "modified", "renamed"}
+          changed_paths = [
+              item["filename"]
+              for item in changed_files
+              if item.get("status", "") in executable_statuses
+          ]
           workflow_changed = any(
               any(fnmatch.fnmatch(path, pattern) for pattern in workflow_patterns)
               for path in changed_paths
@@ -269,7 +274,7 @@ jobs:
         with:
           repository: ${{ needs.resolve-run-context.outputs.checkout_repository }}
           ref: ${{ needs.resolve-run-context.outputs.checkout_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
       - name: Verify checked out revision
         run: |
@@ -288,11 +293,16 @@ jobs:
             accept-flake-config = false
       - name: Run safe pre-commit hooks on changed files
         env:
-          FROM_SHA: ${{ needs.resolve-run-context.outputs.comparison_base_sha }}
-          HEAD_SHA: ${{ needs.resolve-run-context.outputs.checkout_sha }}
+          CHANGED_FILES: ${{ needs.resolve-run-context.outputs.changed_files }}
         run: |
           set -euo pipefail
-          mapfile -t changed_files < <(git diff --name-only --diff-filter=ACMR "$FROM_SHA" "$HEAD_SHA")
+          changed_files=()
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              changed_files+=("$path")
+            fi
+          done <<< "${CHANGED_FILES:-}"
           if [ "${#changed_files[@]}" -eq 0 ]; then
             echo "No changed files detected; skipping pre-commit."
             exit 0
@@ -343,9 +353,9 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = false
       - name: Evaluate ISO package
-        run: nix eval --accept-flake-config false ./nix-config#packages.x86_64-linux.nails-os-iso.drvPath
+        run: nix --option accept-flake-config false eval ./nix-config#packages.x86_64-linux.nails-os-iso.drvPath
       - name: Evaluate primary NixOS configuration
-        run: nix eval --accept-flake-config false ./nix-config#nixosConfigurations.nails-os.config.system.build.toplevel.drvPath
+        run: nix --option accept-flake-config false eval ./nix-config#nixosConfigurations.nails-os.config.system.build.toplevel.drvPath
 
   pr-safe-result:
     name: PR-safe ISO validation result

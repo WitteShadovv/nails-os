@@ -15,11 +15,13 @@ on:
       - '.github/workflows/build-iso-pr.yml'
       - '.github/workflows/build-iso-main.yml'
       - '.github/workflows/build-iso-pr-safe.yml'
+      - '.github/workflows/build-iso-pr-approved.yml'
       - '.github/workflows/build-iso-pr-trusted.yml'
       - '.github/workflows/release.yml'
       - '.pre-commit-config.yaml'
 
 permissions:
+  actions: write
   contents: read
   pull-requests: read
 
@@ -30,7 +32,6 @@ concurrency:
 jobs:
   approve-pr:
     name: Await Hetzner PR approval
-    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -38,89 +39,39 @@ jobs:
       approved_head_repository: ${{ steps.record-approval.outputs.approved_head_repository }}
       approved_head_ref: ${{ steps.record-approval.outputs.approved_head_ref }}
       approved_head_sha: ${{ steps.record-approval.outputs.approved_head_sha }}
+      approved_base_sha: ${{ steps.record-approval.outputs.approved_base_sha }}
+      approval_artifact_name: ${{ steps.record-approval.outputs.approval_artifact_name }}
     environment:
       name: hetzner-pr
     steps:
       - name: Record approval gate context
         id: record-approval
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          {
-            cat <<'EOF'
-          ## Hetzner PR approval
-
-          This job is metadata-only. It does not check out or execute PR code.
-
-          | Property | Value |
-          |---|---|
-          EOF
-            printf '| PR | `#%s` |\n' "$PR_NUMBER"
-            printf '| Head repository | `%s` |\n' "$HEAD_REPOSITORY"
-            printf '| Head ref | `%s` |\n' "$HEAD_REF"
-            printf '| Head SHA | `%s` |\n' "$HEAD_SHA"
-            printf '| Base branch | `%s` |\n' "$BASE_REF"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          {
-            printf 'approved_pr_number=%s\n' "$PR_NUMBER"
-            printf 'approved_head_repository=%s\n' "$HEAD_REPOSITORY"
-            printf 'approved_head_ref=%s\n' "$HEAD_REF"
-            printf 'approved_head_sha=%s\n' "$HEAD_SHA"
-          } >> "$GITHUB_OUTPUT"
-
-  resolve-run-context:
-    name: Resolve trusted run context
-    needs: [approve-pr]
-    if: ${{ always() && (github.event_name != 'pull_request_target' || needs.approve-pr.result == 'success') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      run_mode: ${{ steps.resolve.outputs.run_mode }}
-      reason: ${{ steps.resolve.outputs.reason }}
-      pr_number: ${{ steps.resolve.outputs.pr_number }}
-      checkout_repository: ${{ steps.resolve.outputs.checkout_repository }}
-      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
-      checkout_sha: ${{ steps.resolve.outputs.checkout_sha }}
-      comparison_base_sha: ${{ steps.resolve.outputs.comparison_base_sha }}
-    steps:
-      - name: Resolve trusted checkout target
-        id: resolve
-        env:
-          EVENT_NAME: ${{ github.event_name }}
           GITHUB_TOKEN: ${{ github.token }}
-          APPROVED_PR_NUMBER: ${{ needs.approve-pr.outputs.approved_pr_number }}
-          APPROVED_HEAD_REPOSITORY: ${{ needs.approve-pr.outputs.approved_head_repository }}
-          APPROVED_HEAD_REF: ${{ needs.approve-pr.outputs.approved_head_ref }}
-          APPROVED_HEAD_SHA: ${{ needs.approve-pr.outputs.approved_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SOURCE_WORKFLOW_NAME: ${{ github.workflow }}
+          SOURCE_EVENT_NAME: ${{ github.event_name }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          APPROVAL_CONTEXT_DIR: ${{ runner.temp }}/approval-context
         run: |
           python3 <<'PY'
           import json
           import os
-          import re
+          from pathlib import Path
           import urllib.request
 
           api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
           token = os.environ["GITHUB_TOKEN"]
           repo = os.environ["GITHUB_REPOSITORY"]
-          event_name = os.environ["EVENT_NAME"]
+          pr_number = os.environ["PR_NUMBER"]
+          source_workflow_name = os.environ["SOURCE_WORKFLOW_NAME"]
+          source_event_name = os.environ["SOURCE_EVENT_NAME"]
+          source_run_id = os.environ["SOURCE_RUN_ID"]
+          source_run_attempt = os.environ["SOURCE_RUN_ATTEMPT"]
+          approval_context_dir = Path(os.environ["APPROVAL_CONTEXT_DIR"])
           output_path = os.environ["GITHUB_OUTPUT"]
           summary_path = os.environ["GITHUB_STEP_SUMMARY"]
-
-          run_mode = ""
-          reason = ""
-          pr_number = os.environ.get("APPROVED_PR_NUMBER", "")
-          approved_head_repository = os.environ.get("APPROVED_HEAD_REPOSITORY", "")
-          approved_head_ref = os.environ.get("APPROVED_HEAD_REF", "")
-          approved_head_sha = os.environ.get("APPROVED_HEAD_SHA", "")
-          checkout_repository = repo
-          checkout_ref = os.environ["GITHUB_REF"]
-          checkout_sha = os.environ["GITHUB_SHA"]
-          comparison_base_sha = ""
 
           def write_output(name, value):
               value = "" if value is None else str(value)
@@ -142,101 +93,178 @@ jobs:
               with urllib.request.urlopen(request) as response:
                   return json.loads(response.read().decode("utf-8"))
 
-          def is_full_sha(value):
-              return bool(re.fullmatch(r"[0-9a-f]{40}", value or ""))
+          if not pr_number.isdigit():
+              raise SystemExit(f"Invalid pull request number: {pr_number!r}")
 
-          def is_repo_slug(value):
-              return bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value or ""))
+          pr = api_get(f"/repos/{repo}/pulls/{pr_number}")
+          if pr["state"] != "open":
+              raise SystemExit(f"PR #{pr_number} is no longer open.")
+          if pr["base"]["ref"] != "main":
+              raise SystemExit(f"PR #{pr_number} no longer targets main.")
 
-          if event_name == "pull_request_target":
-              if not pr_number.isdigit():
-                  raise SystemExit(f"Invalid pull request number: {pr_number!r}")
-              if not is_repo_slug(approved_head_repository):
-                  raise SystemExit(f"Invalid approved head repository: {approved_head_repository!r}")
-              if not approved_head_ref:
-                  raise SystemExit("Approved head ref is required")
-              if not is_full_sha(approved_head_sha):
-                  raise SystemExit(f"Invalid approved head SHA: {approved_head_sha!r}")
-              pr = api_get(f"/repos/{repo}/pulls/{pr_number}")
-              if pr["state"] != "open":
-                  raise SystemExit(f"PR #{pr_number} is no longer open.")
-              if pr["base"]["ref"] != "main":
-                  raise SystemExit(f"PR #{pr_number} no longer targets main.")
-              live_head_repository = pr["head"]["repo"]["full_name"]
-              live_head_ref = pr["head"]["ref"]
-              live_head_sha = pr["head"]["sha"]
-              if live_head_repository != approved_head_repository:
-                  raise SystemExit(
-                      f"PR #{pr_number} head repository changed after approval: approved {approved_head_repository}, current {live_head_repository}. Re-run the workflow and re-approve the current head repository/SHA."
-                  )
-              if live_head_ref != approved_head_ref:
-                  raise SystemExit(
-                      f"PR #{pr_number} head ref changed after approval: approved {approved_head_ref}, current {live_head_ref}. Re-run the workflow and re-approve the current head ref/SHA."
-                  )
-              if live_head_sha != approved_head_sha:
-                  raise SystemExit(
-                      f"PR #{pr_number} head SHA changed after approval: approved {approved_head_sha}, current {live_head_sha}. Re-run the workflow and re-approve the current head SHA."
-                  )
-              checkout_repository = approved_head_repository
-              checkout_ref = approved_head_ref
-              checkout_sha = approved_head_sha
-              comparison_base_sha = pr["base"]["sha"]
-              run_mode = "pr"
-              reason = (
-                  f"Approved pull_request_target run for PR #{pr_number}; provisioning the Hetzner-backed ISO builder for reviewed head SHA {approved_head_sha} is allowed."
-              )
-          else:
-              raise SystemExit(
-                  f"Event `{event_name}` is not allowed for the trusted PR Hetzner ISO wrapper."
-              )
+          head_repository = pr["head"]["repo"]["full_name"]
+          head_ref = pr["head"]["ref"]
+          head_sha = pr["head"]["sha"]
+          base_sha = pr["base"]["sha"]
+          approval_artifact_name = (
+              f"hetzner-pr-approval-context-pr-{pr_number}-run-{source_run_id}-attempt-{source_run_attempt}"
+          )
+          approval_context_dir.mkdir(parents=True, exist_ok=True)
+          approval_context_path = approval_context_dir / "approval-context.json"
+          approval_context = {
+              "schema_version": 1,
+              "pr_number": pr_number,
+              "checkout_repository": head_repository,
+              "checkout_ref": head_ref,
+              "checkout_sha": head_sha,
+              "comparison_base_sha": base_sha,
+              "source_repository": repo,
+              "source_workflow_file": ".github/workflows/build-iso-pr-trusted.yml",
+              "source_workflow_name": source_workflow_name,
+              "source_event_name": source_event_name,
+              "source_run_id": source_run_id,
+              "source_run_attempt": source_run_attempt,
+              "source_environment": "hetzner-pr",
+              "source_job_name": "Await Hetzner PR approval",
+              "source_artifact_name": approval_artifact_name,
+              "metadata_only": True,
+          }
+          approval_context_path.write_text(
+              json.dumps(approval_context, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
 
-          write_output("run_mode", run_mode)
-          write_output("reason", reason)
-          write_output("pr_number", pr_number)
-          write_output("checkout_repository", checkout_repository)
-          write_output("checkout_ref", checkout_ref)
-          write_output("checkout_sha", checkout_sha)
-          write_output("comparison_base_sha", comparison_base_sha)
+          write_output("approved_pr_number", pr_number)
+          write_output("approved_head_repository", head_repository)
+          write_output("approved_head_ref", head_ref)
+          write_output("approved_head_sha", head_sha)
+          write_output("approved_base_sha", base_sha)
+          write_output("approval_artifact_name", approval_artifact_name)
 
           with open(summary_path, "a", encoding="utf-8") as summary:
-              summary.write("## Trusted run context\n\n")
+              summary.write("## Hetzner PR approval\n\n")
+              summary.write("This job is metadata-only. It does not check out or execute PR code.\n\n")
               summary.write("| Property | Value |\n")
               summary.write("|---|---|\n")
-              summary.write(f"| Event | `{event_name}` |\n")
-              summary.write(f"| Run mode | `{run_mode}` |\n")
-              summary.write(f"| PR number | `{pr_number or 'n/a'}` |\n")
+              summary.write(f"| PR | `#{pr_number}` |\n")
+              summary.write(f"| Head repository | `{head_repository}` |\n")
+              summary.write(f"| Head ref | `{head_ref}` |\n")
+              summary.write(f"| Head SHA | `{head_sha}` |\n")
+              summary.write(f"| Base branch | `{pr['base']['ref']}` |\n")
+              summary.write(f"| Base SHA | `{base_sha}` |\n")
+              summary.write(f"| Approval context artifact | `{approval_artifact_name}` |\n")
+              summary.write("\nAfter approval, this workflow dispatches a separate trusted `workflow_dispatch` build bound to the exact approved PR head repository/ref/SHA.\n")
+          PY
+
+      - name: Upload approval context artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: ${{ steps.record-approval.outputs.approval_artifact_name }}
+          path: ${{ runner.temp }}/approval-context/approval-context.json
+          if-no-files-found: error
+          retention-days: 7
+
+  dispatch-approved-build:
+    name: Dispatch approved PR ISO build
+    needs: approve-pr
+    if: needs.approve-pr.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      expected_display_title: ${{ steps.dispatch.outputs.expected_display_title }}
+      dispatched_at: ${{ steps.dispatch.outputs.dispatched_at }}
+    steps:
+      - name: Dispatch trusted child workflow
+        id: dispatch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.approve-pr.outputs.approved_pr_number }}
+          CHECKOUT_REPOSITORY: ${{ needs.approve-pr.outputs.approved_head_repository }}
+          CHECKOUT_REF: ${{ needs.approve-pr.outputs.approved_head_ref }}
+          CHECKOUT_SHA: ${{ needs.approve-pr.outputs.approved_head_sha }}
+          COMPARISON_BASE_SHA: ${{ needs.approve-pr.outputs.approved_base_sha }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_ARTIFACT_NAME: ${{ needs.approve-pr.outputs.approval_artifact_name }}
+        run: |
+          python3 <<'PY'
+          import datetime
+          import json
+          import os
+          import urllib.request
+
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          token = os.environ["GITHUB_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          output_path = os.environ["GITHUB_OUTPUT"]
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+
+          pr_number = os.environ["PR_NUMBER"]
+          checkout_repository = os.environ["CHECKOUT_REPOSITORY"]
+          checkout_ref = os.environ["CHECKOUT_REF"]
+          checkout_sha = os.environ["CHECKOUT_SHA"]
+          comparison_base_sha = os.environ["COMPARISON_BASE_SHA"]
+          source_run_id = os.environ["SOURCE_RUN_ID"]
+          source_run_attempt = os.environ["SOURCE_RUN_ATTEMPT"]
+          source_artifact_name = os.environ["SOURCE_ARTIFACT_NAME"]
+          expected_display_title = (
+              f"Approved PR ISO build #{pr_number} @ {checkout_sha} (gate run {source_run_id} attempt {source_run_attempt})"
+          )
+          dispatched_at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+          payload = json.dumps(
+              {
+                  "ref": "main",
+                  "inputs": {
+                      "pr_number": pr_number,
+                      "checkout_repository": checkout_repository,
+                      "checkout_ref": checkout_ref,
+                      "checkout_sha": checkout_sha,
+                      "comparison_base_sha": comparison_base_sha,
+                      "source_run_id": source_run_id,
+                      "source_run_attempt": source_run_attempt,
+                      "source_artifact_name": source_artifact_name,
+                  },
+              }
+          ).encode("utf-8")
+
+          request = urllib.request.Request(
+              f"{api_url}/repos/{repo}/actions/workflows/build-iso-pr-approved.yml/dispatches",
+              data=payload,
+              method="POST",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Content-Type": "application/json",
+              },
+          )
+
+          with urllib.request.urlopen(request):
+              pass
+
+          with open(output_path, "a", encoding="utf-8") as fh:
+              fh.write(f"expected_display_title={expected_display_title}\n")
+              fh.write(f"dispatched_at={dispatched_at}\n")
+
+          with open(summary_path, "a", encoding="utf-8") as summary:
+              summary.write("## Dispatched trusted child workflow\n\n")
+              summary.write("| Property | Value |\n")
+              summary.write("|---|---|\n")
+              summary.write(f"| Workflow | `build-iso-pr-approved.yml` |\n")
+              summary.write(f"| PR | `#{pr_number}` |\n")
               summary.write(f"| Checkout repository | `{checkout_repository}` |\n")
               summary.write(f"| Checkout ref | `{checkout_ref}` |\n")
               summary.write(f"| Checkout SHA | `{checkout_sha}` |\n")
-              summary.write(f"| Comparison base SHA | `{comparison_base_sha or 'n/a'}` |\n")
-              summary.write(f"| Reason | {reason} |\n")
+              summary.write(f"| Comparison base SHA | `{comparison_base_sha}` |\n")
+              summary.write(f"| Source gate run | `{source_run_id}` |\n")
+              summary.write(f"| Source gate attempt | `{source_run_attempt}` |\n")
+              summary.write(f"| Approval context artifact | `{source_artifact_name}` |\n")
           PY
-
-  build-iso:
-    name: Build approved PR on Hetzner
-    needs: resolve-run-context
-    if: needs.resolve-run-context.result == 'success'
-    uses: ./.github/workflows/build-iso.yml
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      verify_reproducibility: false
-      r2_prefix: latest
-      checkout_repository: ${{ needs.resolve-run-context.outputs.checkout_repository }}
-      checkout_ref: ${{ needs.resolve-run-context.outputs.checkout_ref }}
-      checkout_sha: ${{ needs.resolve-run-context.outputs.checkout_sha }}
-      comparison_base_sha: ${{ needs.resolve-run-context.outputs.comparison_base_sha }}
-      pr_number: ${{ needs.resolve-run-context.outputs.pr_number }}
-      trusted_reason: ${{ needs.resolve-run-context.outputs.reason }}
-    secrets:
-      PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-      HCLOUD_SSH_KEY_ID: ${{ secrets.HCLOUD_SSH_KEY_ID }}
 
   trusted-pr-result:
     name: Trusted PR ISO result
-    needs: [approve-pr, resolve-run-context, build-iso]
+    needs: [approve-pr, dispatch-approved-build]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -244,10 +272,8 @@ jobs:
       - name: Check workflow outcome
         env:
           APPROVAL_RESULT: ${{ needs.approve-pr.result }}
-          RESOLVE_RESULT: ${{ needs.resolve-run-context.result }}
-          TRUST_REASON: ${{ needs.resolve-run-context.outputs.reason }}
-          RUN_MODE: ${{ needs.resolve-run-context.outputs.run_mode }}
-          BUILD_RESULT: ${{ needs.build-iso.result }}
+          DISPATCH_RESULT: ${{ needs.dispatch-approved-build.result }}
+          EXPECTED_DISPLAY_TITLE: ${{ needs.dispatch-approved-build.outputs.expected_display_title }}
         run: |
           set -euo pipefail
 
@@ -258,21 +284,22 @@ jobs:
           | Job | Result |
           |---|---|
           EOF
-            printf '| Run mode | `%s` |\n' "${RUN_MODE}"
-            printf '| PR approval gate | `%s` |\n' "${APPROVAL_RESULT}"
-            printf '| Resolve trusted run context | `%s` |\n' "${RESOLVE_RESULT}"
-            printf '| Build approved PR on Hetzner | `%s` |\n' "${BUILD_RESULT}"
-            printf '\n%s\n' "${TRUST_REASON}"
+            printf '| Await Hetzner PR approval | `%s` |\n' "${APPROVAL_RESULT}"
+            printf '| Dispatch approved PR ISO build | `%s` |\n' "${DISPATCH_RESULT}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [[ "$RESOLVE_RESULT" != "success" ]]; then
-            echo "::error::Failed to resolve a trusted checkout target."
+          if [ -n "${EXPECTED_DISPLAY_TITLE:-}" ]; then
+            printf '\nDispatched child workflow title: `%s`\n' "${EXPECTED_DISPLAY_TITLE}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ "${APPROVAL_RESULT}" != 'success' ]]; then
+            echo "::error::Hetzner PR approval did not complete successfully."
             exit 1
           fi
 
-          if [[ "$BUILD_RESULT" != "success" ]]; then
-            echo "::error::The trusted Hetzner ISO build did not complete successfully."
+          if [[ "${DISPATCH_RESULT}" != 'success' ]]; then
+            echo "::error::Failed to dispatch the trusted PR ISO build workflow."
             exit 1
           fi
 
-          echo "Trusted PR ISO workflow completed successfully."
+          echo "Trusted PR ISO gate workflow completed successfully and dispatched the child build workflow."
