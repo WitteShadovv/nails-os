@@ -1,0 +1,260 @@
+name: Build NAILS OS ISO (PR trusted metadata gate)
+
+on:
+  pull_request_target:
+    branches: [main]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: build-iso-pr-trusted-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  assess-workflow-risk:
+    name: Assess workflow-change risk without checkout
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      workflow_changed: ${{ steps.assess.outputs.workflow_changed }}
+      changed_files_count: ${{ steps.assess.outputs.changed_files_count }}
+      matched_files: ${{ steps.assess.outputs.matched_files }}
+      head_sha: ${{ steps.assess.outputs.head_sha }}
+      approval_label_name: ${{ steps.assess.outputs.approval_label_name }}
+      approval_label_present: ${{ steps.assess.outputs.approval_label_present }}
+      approval_state: ${{ steps.assess.outputs.approval_state }}
+    steps:
+      - name: Inspect PR files via GitHub API only
+        id: assess
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          python3 <<'PY'
+          import fnmatch
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          token = os.environ["GITHUB_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          pr_number = os.environ["PR_NUMBER"]
+          output_path = os.environ["GITHUB_OUTPUT"]
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+          approval_label_name = "workflow-review-approved"
+          event_action = os.environ["EVENT_ACTION"]
+
+          workflow_patterns = [
+              ".github/workflows/*.yml",
+              ".github/workflows/*.yaml",
+          ]
+
+          def write_output(name, value):
+              value = "" if value is None else str(value)
+              with open(output_path, "a", encoding="utf-8") as fh:
+                  if "\n" in value:
+                      fh.write(f"{name}<<EOF\n{value}\nEOF\n")
+                  else:
+                      fh.write(f"{name}={value}\n")
+
+          def api_get(path):
+              request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          def api_delete(path):
+              request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  method="DELETE",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request):
+                  return None
+
+          if not pr_number.isdigit():
+              raise SystemExit(f"Invalid pull request number: {pr_number!r}")
+
+          pr = api_get(f"/repos/{repo}/pulls/{pr_number}")
+          if pr["base"]["ref"] != "main":
+              raise SystemExit(f"PR #{pr_number} no longer targets main.")
+
+          head_sha = pr["head"]["sha"]
+
+          current_labels = [label.get("name", "") for label in pr.get("labels", [])]
+          approval_label_present = approval_label_name in current_labels
+          approval_state = "present" if approval_label_present else "missing"
+
+          changed_files = []
+          page = 1
+          while True:
+              page_items = api_get(f"/repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}")
+              if not page_items:
+                  break
+              changed_files.extend(page_items)
+              if len(page_items) < 100:
+                  break
+              page += 1
+
+          matched = []
+          for item in changed_files:
+              filename = item["filename"]
+              previous_filename = item.get("previous_filename") or ""
+              candidates = [filename]
+              if previous_filename:
+                  candidates.append(previous_filename)
+              matches = [
+                  path
+                  for path in candidates
+                  if any(fnmatch.fnmatch(path, pattern) for pattern in workflow_patterns)
+              ]
+              if matches:
+                  matched.append(
+                      {
+                          "filename": filename,
+                          "previous_filename": previous_filename,
+                          "status": item.get("status", "unknown"),
+                          "matching_paths": matches,
+                      }
+                  )
+
+          workflow_changed = "true" if matched else "false"
+          matched_lines = []
+          for item in matched:
+              line = f"{item['status']}: {item['filename']}"
+              if item["previous_filename"]:
+                  line += f" (previously {item['previous_filename']})"
+              line += f" [matched: {', '.join(item['matching_paths'])}]"
+              matched_lines.append(line)
+
+          if workflow_changed == "true" and approval_label_present and event_action == "synchronize":
+              encoded_label = urllib.parse.quote(approval_label_name, safe="")
+              api_delete(f"/repos/{repo}/issues/{pr_number}/labels/{encoded_label}")
+              approval_label_present = False
+              approval_state = "invalidated-on-synchronize"
+
+          write_output("workflow_changed", workflow_changed)
+          write_output("changed_files_count", str(len(changed_files)))
+          write_output("matched_files", "\n".join(matched_lines))
+          write_output("head_sha", head_sha)
+          write_output("approval_label_name", approval_label_name)
+          write_output("approval_label_present", "true" if approval_label_present else "false")
+          write_output("approval_state", approval_state)
+
+          with open(summary_path, "a", encoding="utf-8") as summary:
+              summary.write("## Trusted workflow-change assessment\n\n")
+              summary.write("This pull_request_target workflow is metadata-only. It does not check out or execute PR code.\n\n")
+              summary.write("| Property | Value |\n")
+              summary.write("|---|---|\n")
+              summary.write(f"| PR | `#{pr_number}` |\n")
+              summary.write(f"| PR head SHA | `{head_sha}` |\n")
+              summary.write(f"| Event action | `{event_action}` |\n")
+              summary.write(f"| Changed files inspected | `{len(changed_files)}` |\n")
+              summary.write(f"| Workflow files changed | `{workflow_changed}` |\n")
+              summary.write(f"| Approval label | `{approval_label_name}` |\n")
+              summary.write(f"| Approval label present | `{'true' if approval_label_present else 'false'}` |\n")
+              summary.write(f"| Approval state | `{approval_state}` |\n")
+              if matched:
+                  summary.write("\n### Workflow files touched\n\n")
+                  for line in matched_lines:
+                      summary.write(f"- `{line}`\n")
+              summary.write("\n### Security posture\n\n")
+              if matched:
+                  summary.write("- Workflow files changed in this PR. Treat the unprivileged pull_request CI results as attacker-controlled until a maintainer reviews the workflow diff.\n")
+                  summary.write(f"- Maintainers may apply the `{approval_label_name}` label after review to acknowledge the workflow diff for the current PR head SHA.\n")
+                  summary.write("- On every new commit (`synchronize` event), this workflow automatically removes that approval label so approval cannot persist across commits.\n")
+                  summary.write("- No secrets, approvals, or infrastructure provisioning are exposed through this workflow.\n")
+              else:
+                  summary.write("- No workflow files changed. The separate pull_request workflow can safely provide unprivileged validation.\n")
+          PY
+
+  trusted-pr-metadata-result:
+    name: Trusted PR metadata result
+    needs: assess-workflow-risk
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Finalize trusted metadata assessment
+        env:
+          ASSESS_RESULT: ${{ needs.assess-workflow-risk.result }}
+          WORKFLOW_CHANGED: ${{ needs.assess-workflow-risk.outputs.workflow_changed }}
+          CHANGED_FILES_COUNT: ${{ needs.assess-workflow-risk.outputs.changed_files_count }}
+          MATCHED_FILES: ${{ needs.assess-workflow-risk.outputs.matched_files }}
+          HEAD_SHA: ${{ needs.assess-workflow-risk.outputs.head_sha }}
+          APPROVAL_LABEL_NAME: ${{ needs.assess-workflow-risk.outputs.approval_label_name }}
+          APPROVAL_LABEL_PRESENT: ${{ needs.assess-workflow-risk.outputs.approval_label_present }}
+          APPROVAL_STATE: ${{ needs.assess-workflow-risk.outputs.approval_state }}
+        run: |
+          set -euo pipefail
+
+          {
+            cat <<'EOF'
+          ## Trusted PR metadata result
+
+          | Property | Value |
+          |---|---|
+          EOF
+            printf '| Metadata assessment job | `%s` |\n' "${ASSESS_RESULT}"
+            printf '| PR head SHA | `%s` |\n' "${HEAD_SHA}"
+            printf '| Changed files inspected | `%s` |\n' "${CHANGED_FILES_COUNT:-0}"
+            printf '| Workflow files changed | `%s` |\n' "${WORKFLOW_CHANGED}"
+            printf '| Approval label | `%s` |\n' "${APPROVAL_LABEL_NAME}"
+            printf '| Approval label present | `%s` |\n' "${APPROVAL_LABEL_PRESENT}"
+            printf '| Approval state | `%s` |\n' "${APPROVAL_STATE}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${MATCHED_FILES:-}" ]; then
+            {
+              printf '\n### Workflow files touched\n\n'
+              while IFS= read -r file; do
+                [ -n "$file" ] && printf -- '- `%s`\n' "$file"
+              done <<< "${MATCHED_FILES}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ "${ASSESS_RESULT}" != 'success' ]]; then
+            echo "::error::Failed to perform the trusted metadata-only workflow assessment."
+            exit 1
+          fi
+
+          if [[ "${WORKFLOW_CHANGED}" == 'true' ]]; then
+            if [[ "${APPROVAL_LABEL_PRESENT}" == 'true' ]]; then
+              echo "Workflow files changed, and the maintainer-controlled approval label is present for current head SHA ${HEAD_SHA}. Trusted metadata-only gate passes."
+              exit 0
+            fi
+
+            if [[ "${APPROVAL_STATE}" == 'invalidated-on-synchronize' ]]; then
+              echo "::error::Workflow files changed and a previous approval label was automatically removed after new commits were pushed. A maintainer must re-apply '${APPROVAL_LABEL_NAME}' after reviewing current head SHA ${HEAD_SHA}."
+              exit 1
+            fi
+
+            echo "::error::Workflow files changed and no maintainer-controlled approval label is present. After reviewing the workflow diff for current head SHA ${HEAD_SHA}, a maintainer may apply '${APPROVAL_LABEL_NAME}' to allow this metadata-only gate to pass."
+            exit 1
+          fi
+
+          echo "Trusted metadata-only workflow assessment completed; no workflow files were changed."

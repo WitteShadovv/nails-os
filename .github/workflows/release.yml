@@ -56,14 +56,9 @@ jobs:
   build:
     name: Build ISO
     uses: ./.github/workflows/build-iso.yml
-    # Grant the permissions that build-iso.yml's jobs declare:
-    #   - contents: read  (top-level default in build-iso.yml)
-    #   - contents: write (publish-latest job in build-iso.yml)
-    # The caller must grant the union of all permissions the callee may use.
-    # publish-latest only runs on push-to-main (not on workflow_call), but
-    # GitHub validates declared permissions at parse time regardless of `if`.
     permissions:
-      contents: write
+      contents: read
+      pull-requests: read
     with:
       verify_reproducibility: true
       r2_prefix: "stable"
