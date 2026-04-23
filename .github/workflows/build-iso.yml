@@ -3,9 +3,10 @@
 # =============================================================================
 #
 # Builds the NAILS OS privacy-focused ISO on ephemeral Hetzner Cloud servers.
-# This workflow is the trusted build engine used by release/manual/main wrappers.
-# PR-triggered validation is split into a separate unprivileged reusable
-# workflow so this workflow never needs to execute untrusted PR code.
+# This workflow is the trusted build engine used by release/manual/main wrappers
+# and the approved pull_request_target PR wrapper. Untrusted PR code is never
+# checked out before approval; once a maintainer approves the `hetzner-pr`
+# environment gate, the exact PR head SHA can be built on Hetzner.
 #
 # Architecture:
 #   1. create-runner  — Provisions a Hetzner Cloud server as a self-hosted
@@ -60,6 +61,36 @@ on:
         required: false
         type: string
         default: "latest"
+      checkout_repository:
+        description: "Trusted checkout repository override"
+        required: false
+        type: string
+        default: ""
+      checkout_ref:
+        description: "Trusted checkout ref metadata override"
+        required: false
+        type: string
+        default: ""
+      checkout_sha:
+        description: "Trusted checkout exact SHA override"
+        required: false
+        type: string
+        default: ""
+      comparison_base_sha:
+        description: "Trusted comparison base SHA override"
+        required: false
+        type: string
+        default: ""
+      pr_number:
+        description: "Approved pull request number for trusted PR runs"
+        required: false
+        type: string
+        default: ""
+      trusted_reason:
+        description: "Human-readable trusted execution rationale"
+        required: false
+        type: string
+        default: ""
     secrets:
       PERSONAL_ACCESS_TOKEN:
         required: false
@@ -106,7 +137,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-iso-${{ github.ref || github.run_id }}
+  group: build-iso-${{ inputs.pr_number || inputs.checkout_sha || github.ref || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -157,9 +188,16 @@ jobs:
         id: resolve
         env:
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_CHECKOUT_REPOSITORY: ${{ inputs.checkout_repository }}
+          INPUT_CHECKOUT_REF: ${{ inputs.checkout_ref }}
+          INPUT_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+          INPUT_COMPARISON_BASE_SHA: ${{ inputs.comparison_base_sha }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_TRUSTED_REASON: ${{ inputs.trusted_reason }}
         run: |
           python3 <<'PY'
           import os
+          import re
           repo = os.environ["GITHUB_REPOSITORY"]
           event_name = os.environ["EVENT_NAME"]
           output_path = os.environ["GITHUB_OUTPUT"]
@@ -181,12 +219,47 @@ jobs:
                   else:
                       fh.write(f"{name}={value}\n")
 
+          def is_full_sha(value):
+              return bool(re.fullmatch(r"[0-9a-f]{40}", value or ""))
+
+          def is_repo_slug(value):
+              return bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value or ""))
+
           if event_name == "workflow_dispatch":
               run_mode = "manual"
               reason = "Trusted manual run; provisioning the Hetzner-backed ISO builder is allowed."
           elif event_name == "workflow_call":
-              run_mode = "reusable"
-              reason = "Trusted reusable workflow invocation; provisioning the Hetzner-backed ISO builder is allowed."
+              input_checkout_repository = os.environ.get("INPUT_CHECKOUT_REPOSITORY", "")
+              input_checkout_ref = os.environ.get("INPUT_CHECKOUT_REF", "")
+              input_checkout_sha = os.environ.get("INPUT_CHECKOUT_SHA", "")
+              input_comparison_base_sha = os.environ.get("INPUT_COMPARISON_BASE_SHA", "")
+              input_pr_number = os.environ.get("INPUT_PR_NUMBER", "")
+              input_trusted_reason = os.environ.get("INPUT_TRUSTED_REASON", "")
+
+              if input_checkout_repository or input_checkout_ref or input_checkout_sha or input_pr_number:
+                  if not is_repo_slug(input_checkout_repository):
+                      raise SystemExit(f"Invalid checkout repository override: {input_checkout_repository!r}")
+                  if not input_checkout_ref:
+                      raise SystemExit("checkout_ref override is required when checkout overrides are provided")
+                  if not is_full_sha(input_checkout_sha):
+                      raise SystemExit(f"Invalid checkout SHA override: {input_checkout_sha!r}")
+                  if input_comparison_base_sha and not is_full_sha(input_comparison_base_sha):
+                      raise SystemExit(f"Invalid comparison base SHA override: {input_comparison_base_sha!r}")
+                  if input_pr_number and not input_pr_number.isdigit():
+                      raise SystemExit(f"Invalid pull request number override: {input_pr_number!r}")
+
+                  run_mode = "pr" if input_pr_number else "reusable"
+                  reason = input_trusted_reason or (
+                      f"Trusted reusable workflow invocation against exact SHA {input_checkout_sha}; provisioning the Hetzner-backed ISO builder is allowed."
+                  )
+                  pr_number = input_pr_number
+                  checkout_repository = input_checkout_repository
+                  checkout_ref = input_checkout_ref
+                  checkout_sha = input_checkout_sha
+                  comparison_base_sha = input_comparison_base_sha
+              else:
+                  run_mode = "reusable"
+                  reason = "Trusted reusable workflow invocation; provisioning the Hetzner-backed ISO builder is allowed."
           else:
               raise SystemExit(
                   f"Event `{event_name}` is not allowed to provision secret-backed Hetzner runners."

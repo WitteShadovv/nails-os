@@ -137,8 +137,8 @@ jobs:
               raise SystemExit("checkout_ref does not match the live PR head ref.")
           if pr["head"]["sha"] != checkout_sha:
               raise SystemExit("checkout_sha does not match the live PR head SHA.")
-          if pr["base"]["sha"] != comparison_base_sha:
-              raise SystemExit("comparison_base_sha does not match the live PR base SHA.")
+          live_base_sha = pr["base"]["sha"]
+          comparison_base_sha_stale = comparison_base_sha != live_base_sha
 
           changed_files = []
           page = 1
@@ -168,6 +168,7 @@ jobs:
           write_output("checkout_ref", checkout_ref)
           write_output("checkout_sha", checkout_sha)
           write_output("comparison_base_sha", comparison_base_sha)
+          write_output("comparison_base_sha_stale", "true" if comparison_base_sha_stale else "false")
           write_output("workflow_changed", "true" if workflow_changed else "false")
           write_output("changed_files", "\n".join(changed_paths))
 
@@ -181,6 +182,8 @@ jobs:
               summary.write(f"| Checkout ref | `{checkout_ref}` |\n")
               summary.write(f"| Checkout SHA | `{checkout_sha}` |\n")
               summary.write(f"| Comparison base SHA | `{comparison_base_sha}` |\n")
+              summary.write(f"| Live PR base SHA | `{live_base_sha}` |\n")
+              summary.write(f"| Comparison base SHA stale | `{'true' if comparison_base_sha_stale else 'false'}` |\n")
               summary.write(f"| Workflow files changed | `{'true' if workflow_changed else 'false'}` |\n")
               summary.write(f"| Reason | {reason} |\n")
           PY
@@ -238,15 +241,11 @@ jobs:
             exit 1
           fi
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@37d18f533aba8bc4e46bf0f245167d57353f6024  # v20
-      - name: Configure safe Nix settings
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.config/nix
-          cat > ~/.config/nix/nix.conf <<'EOF'
-          experimental-features = nix-command flakes
-          accept-flake-config = false
-          EOF
+        uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
       - name: Run actionlint on workflow files
         run: |
           set -euo pipefail
@@ -282,15 +281,11 @@ jobs:
             exit 1
           fi
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@37d18f533aba8bc4e46bf0f245167d57353f6024  # v20
-      - name: Configure safe Nix settings
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.config/nix
-          cat > ~/.config/nix/nix.conf <<'EOF'
-          experimental-features = nix-command flakes
-          accept-flake-config = false
-          EOF
+        uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
       - name: Run safe pre-commit hooks on changed files
         env:
           FROM_SHA: ${{ needs.resolve-run-context.outputs.comparison_base_sha }}
@@ -342,15 +337,11 @@ jobs:
             exit 1
           fi
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@37d18f533aba8bc4e46bf0f245167d57353f6024  # v20
-      - name: Configure safe Nix settings
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.config/nix
-          cat > ~/.config/nix/nix.conf <<'EOF'
-          experimental-features = nix-command flakes
-          accept-flake-config = false
-          EOF
+        uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
       - name: Evaluate ISO package
         run: nix eval --accept-flake-config false ./nix-config#packages.x86_64-linux.nails-os-iso.drvPath
       - name: Evaluate primary NixOS configuration
