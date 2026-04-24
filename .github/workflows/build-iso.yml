@@ -145,35 +145,7 @@ concurrency:
   group: build-iso-${{ inputs.pr_number || inputs.checkout_sha || github.ref || github.run_id }}
   cancel-in-progress: true
 
-env:
-  NIX_SETUP_SCRIPT: | # pragma: allowlist secret
-    set -euo pipefail
-    INSTALLER_URL='https://install.determinate.systems/nix'
-    INSTALLER_SHA256='1de1a9ddba23464d037aea82a16ca6cc800e1b06eda67c8007560ab6c56afdb7' # pragma: allowlist secret
-    NIX_INSTALLER_BINARY_ROOT='https://install.determinate.systems/nix/tag/v3.17.3'
-    TMP_DIR=$(mktemp -d)
-    trap 'rm -rf "$TMP_DIR"' EXIT
-    INSTALLER="$TMP_DIR/determinate-nix-installer.sh"
-    curl --proto '=https' --tlsv1.2 -sSf -L "$INSTALLER_URL" -o "$INSTALLER"
-    ACTUAL_SHA256=$(sha256sum "$INSTALLER" | awk '{print $1}')
-    if [ "$ACTUAL_SHA256" != "$INSTALLER_SHA256" ]; then
-      echo "Determinate installer checksum mismatch: expected $INSTALLER_SHA256 got $ACTUAL_SHA256" >&2
-      exit 1
-    fi
-    chmod 0755 "$INSTALLER"
-    NIX_INSTALLER_BINARY_ROOT="$NIX_INSTALLER_BINARY_ROOT" sh "$INSTALLER" install --no-confirm
-    mkdir -p /etc/nix
-    cat > /etc/nix/nix.conf << 'NIXCONF'
-    experimental-features = nix-command flakes
-    max-jobs = auto
-    cores = 0
-    sandbox = true
-    accept-flake-config = false
-    NIXCONF
-    systemctl restart nix-daemon
-    for bin in /nix/var/nix/profiles/default/bin/*; do
-      ln -sf "$bin" /usr/local/bin/
-    done
+
 
 jobs:
   resolve-run-context:
@@ -486,7 +458,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 2: ccx33 @ hel1 (Helsinki, FI)
@@ -507,7 +478,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 3: ccx33 @ fsn1 (Falkenstein, DE)
@@ -528,7 +498,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 4: ccx23 @ nbg1 (4 dedicated vCPU, 16GB RAM, 160GB SSD)
@@ -552,7 +521,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 5: ccx23 @ hel1
@@ -577,7 +545,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 6: ccx23 @ fsn1
@@ -603,7 +570,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 7: cpx41 @ nbg1 (8 shared vCPU, 16GB RAM, 240GB SSD)
@@ -630,7 +596,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 8: cpx41 @ hel1
@@ -658,7 +623,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Combo 9: cpx41 @ fsn1 (last resort)
@@ -687,7 +651,6 @@ jobs:
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
           ssh_key: ${{ env.HCLOUD_SSH_KEY_ID_EFFECTIVE }}
-          pre_runner_script: ${{ env.NIX_SETUP_SCRIPT }}
 
       # -----------------------------------------------------------------------
       # Determine which combo succeeded and export its outputs
@@ -918,6 +881,98 @@ jobs:
       vulnerability_summary: ${{ steps.vuln-policy.outputs.summary || 'not-run' }}
     steps:
       # -----------------------------------------------------------------------
+      # Normalize self-hosted runner environment BEFORE any Nix-dependent step.
+      # Ephemeral Hetzner runners may start with an incomplete environment
+      # (missing HOME, USER, SHELL). Resolve each from /etc/passwd and persist
+      # to GITHUB_ENV so every subsequent step inherits a consistent shell env.
+      # -----------------------------------------------------------------------
+      - name: Normalize self-hosted runner environment
+        run: |
+          set -euo pipefail
+
+          ensure_writable_dir() {
+            local dir="$1"
+            local probe_path
+
+            [[ -n "$dir" && "$dir" == /* ]] || return 1
+            mkdir -p "$dir"
+            probe_path="$dir/.github-actions-home-write-test.$$"
+            : > "$probe_path"
+            rm -f "$probe_path"
+          }
+
+          uid="$(id -u)"
+          passwd_entry=""
+
+          if command -v getent >/dev/null 2>&1; then
+            passwd_entry="$(getent passwd "$uid" || true)"
+          fi
+
+          if [[ -z "$passwd_entry" ]] && command -v python3 >/dev/null 2>&1; then
+            passwd_entry="$(python3 -c 'import os, pwd, sys; entry = pwd.getpwuid(os.getuid()); fields = [entry.pw_name, entry.pw_passwd or "x", str(entry.pw_uid), str(entry.pw_gid), entry.pw_gecos, entry.pw_dir, entry.pw_shell]; print(":".join(fields))' || true)"
+          fi
+
+          if [[ -z "$passwd_entry" ]]; then
+            echo "::error::Failed to resolve passwd entry for uid ${uid}; cannot normalize HOME."
+            exit 1
+          fi
+
+          IFS=: read -r passwd_user _ _ _ _ passwd_home passwd_shell <<< "$passwd_entry"
+
+          if [[ -z "$passwd_home" || "$passwd_home" != /* ]]; then
+            echo "::error::Passwd-derived HOME is missing or invalid: '${passwd_home:-}'"
+            exit 1
+          fi
+
+          current_home="${HOME:-}"
+
+          if ! ensure_writable_dir "$passwd_home"; then
+            echo "::error::Unable to determine a writable HOME from passwd. Current HOME='${current_home:-}', passwd HOME='${passwd_home}'."
+            exit 1
+          fi
+
+          normalized_home="$passwd_home"
+
+          user_was_missing=false
+          effective_user="${USER:-}"
+          if [[ -z "$effective_user" && -n "$passwd_user" ]]; then
+            effective_user="$passwd_user"
+            user_was_missing=true
+          fi
+
+          shell_was_missing=false
+          effective_shell="${SHELL:-}"
+          if [[ -z "$effective_shell" && -n "$passwd_shell" && "$passwd_shell" == /* ]]; then
+            effective_shell="$passwd_shell"
+            shell_was_missing=true
+          fi
+
+          export HOME="$normalized_home"
+          if [[ -n "$effective_user" ]]; then
+            export USER="$effective_user"
+          fi
+          if [[ -n "$effective_shell" ]]; then
+            export SHELL="$effective_shell"
+          fi
+
+          {
+            echo "HOME=$HOME"
+            if [[ "$user_was_missing" == "true" ]]; then
+              echo "USER=$effective_user"
+            fi
+            if [[ "$shell_was_missing" == "true" ]]; then
+              echo "SHELL=$effective_shell"
+            fi
+          } >> "$GITHUB_ENV"
+
+          echo "::group::Normalized self-hosted runner environment"
+          printf 'HOME=%s\n' "$HOME"
+          printf 'USER=%s\n' "${USER:-<unset>}"
+          printf 'SHELL=%s\n' "${SHELL:-<unset>}"
+          ls -ld "$HOME"
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
       # Install host dependencies
       # jq and unzip are not pre-installed on Ubuntu 24.04 minimal cloud
       # images. Install them first so every subsequent step can rely on them
@@ -952,69 +1007,57 @@ jobs:
           echo "Checked out exact SHA $actual_sha from ${{ env.EFFECTIVE_CHECKOUT_REPOSITORY }} (${{ env.EFFECTIVE_CHECKOUT_REF }})."
 
       # -----------------------------------------------------------------------
-      # Activate the Nix installation provisioned during Hetzner runner
-      # creation. On ephemeral self-hosted runners the installation exists on
-      # disk, but each job still needs an explicit PATH/environment activation.
+      # Install Nix via cachix/install-nix-action as an actual job step.
+      # This replaces the previous pre_runner_script / Determinate installer
+      # approach which was subject to a race condition: systemctl restart
+      # nix-daemon returned before the daemon was ready, causing the runner
+      # to start the job with an empty /nix/var/nix/profiles/default/bin.
+      # Running the installer as a job step ensures Nix is fully available
+      # before any subsequent step executes.
       # -----------------------------------------------------------------------
-      - name: Activate provisioned Nix
-        run: |
-          set -euo pipefail
-
-          NIX_BIN_DIR="/nix/var/nix/profiles/default/bin"
-
-          echo "::group::Activate provisioned Nix"
-
-          if ! command -v nix >/dev/null 2>&1 || ! command -v nix-store >/dev/null 2>&1; then
-            echo "$NIX_BIN_DIR" >> "$GITHUB_PATH"
-            export PATH="$NIX_BIN_DIR:$PATH"
-          fi
-
-          if ! command -v nix >/dev/null 2>&1; then
-            echo "::error::nix is unavailable after PATH activation"
-            echo "PATH=$PATH"
-            echo "Expected Nix bin directory: $NIX_BIN_DIR"
-            echo "Listing /nix/var/nix/profiles/default for diagnostics:"
-            ls -la /nix/var/nix/profiles/default 2>/dev/null || true
-            echo "Listing $NIX_BIN_DIR for diagnostics:"
-            ls -la "$NIX_BIN_DIR" 2>/dev/null || true
-            exit 1
-          fi
-
-          if ! command -v nix-store >/dev/null 2>&1; then
-            echo "::error::nix-store is unavailable after PATH activation"
-            echo "PATH=$PATH"
-            echo "Expected Nix bin directory: $NIX_BIN_DIR"
-            echo "Listing /nix/var/nix/profiles/default for diagnostics:"
-            ls -la /nix/var/nix/profiles/default 2>/dev/null || true
-            echo "Listing $NIX_BIN_DIR for diagnostics:"
-            ls -la "$NIX_BIN_DIR" 2>/dev/null || true
-            exit 1
-          fi
-
-          echo "Activated nix: $(command -v nix)"
-          echo "Activated nix-store: $(command -v nix-store)"
-          nix --version
-          nix-store --version
-          echo "::endgroup::"
+      - name: Install Nix
+        uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b
+        with:
+          enable_kvm: true
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            system-features = nixos-test benchmark big-parallel kvm
+            max-jobs = auto
+            cores = 0
+            sandbox = true
+            accept-flake-config = false
 
       # -----------------------------------------------------------------------
       # Verify Nix installation
       # -----------------------------------------------------------------------
       - name: Verify Nix installation
         run: |
-          echo "::group::Nix version"
+          set -euo pipefail
+
+          echo "::group::Verify normalized runner environment and Nix installation"
+          printf 'HOME=%s\n' "${HOME:-<unset>}"
+          printf 'USER=%s\n' "${USER:-<unset>}"
+          printf 'SHELL=%s\n' "${SHELL:-<unset>}"
+          echo "PATH=$PATH"
+
+          echo "nix path: $(command -v nix)"
+          echo "nix-store path: $(command -v nix-store)"
           nix --version
-          echo "::endgroup::"
+          nix-store --version
 
-          echo "::group::Nix configuration"
-          nix show-config 2>/dev/null | grep -E '(experimental-features|max-jobs|cores|sandbox)' || true
-          echo "::endgroup::"
+          echo "Listing /nix/var/nix/profiles/default/bin"
+          ls -la /nix/var/nix/profiles/default/bin || true
 
-          echo "::group::Disk space"
+          echo "nix-daemon status"
+          systemctl status nix-daemon --no-pager || true
+
+          echo "Relevant nix configuration"
+          nix show-config 2>/dev/null | grep -E '(experimental-features|system-features|max-jobs|cores|sandbox|accept-flake-config)' || true
+
+          echo "Disk space"
           df -h / /nix 2>/dev/null || df -h /
-          echo "::endgroup::"
 
-          echo "::group::System info"
+          echo "System info"
           echo "CPUs: $(nproc)"
           echo "RAM: $(free -h | awk '/^Mem:/{print $2}')"
           echo "Server type: ${{ needs.create-runner.outputs.server_type }}"
