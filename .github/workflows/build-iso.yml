@@ -270,6 +270,19 @@ jobs:
               else:
                   run_mode = "reusable"
                   reason = "Trusted reusable workflow invocation; provisioning the Hetzner-backed ISO builder is allowed."
+          elif event_name == "push":
+              # build-iso.yml is called via workflow_call from build-iso-main.yml
+              # (triggered by a push to main) or release.yml (triggered by a push
+              # to a v* tag). GitHub Actions propagates the outer triggering event
+              # name into the called workflow's github.event_name context, so we
+              # see "push" here instead of "workflow_call".
+              # Pushes to main and release tags are trusted — only maintainers
+              # with write access can push to those protected refs.
+              run_mode = "reusable"
+              reason = (
+                  "Trusted push to main or release tag via reusable workflow; "
+                  "provisioning the Hetzner-backed ISO builder is allowed."
+              )
           else:
               raise SystemExit(
                   f"Event `{event_name}` is not allowed to provision secret-backed Hetzner runners."
