@@ -202,6 +202,9 @@
               # Non-tor DNS is redirected to Tor's DNSPort (8853)
               assert "udp dport 53 dnat to 127.0.0.1:8853" in ruleset, \
                   "DNS redirect to Tor DNSPort missing"
+              # Wait for network setup to write 127.0.0.1 into resolv.conf — on slow CI VMs
+              # nftables starts before the resolvconf service has populated /etc/resolv.conf.
+              machine.wait_until_succeeds("grep -q '127.0.0.1' /etc/resolv.conf", timeout=120)
               # resolv.conf must point to localhost only
               resolv = machine.succeed("cat /etc/resolv.conf")
               assert "127.0.0.1" in resolv, "resolv.conf missing localhost"
