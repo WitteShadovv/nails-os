@@ -1,4 +1,5 @@
-{ lib, config, ... }: {
+{ lib, config, ... }:
+{
   config = lib.mkMerge [
     {
       networking = {
@@ -6,8 +7,12 @@
           enable = true;
           # Prevent DHCP hostname leaks and randomize MAC addresses by default.
           settings = {
-            main = { "hostname-mode" = "none"; };
-            device = { "wifi.scan-rand-mac-address" = "yes"; };
+            main = {
+              "hostname-mode" = "none";
+            };
+            device = {
+              "wifi.scan-rand-mac-address" = "yes";
+            };
             connection = {
               "wifi.cloned-mac-address" = "random";
               "ethernet.cloned-mac-address" = "random";

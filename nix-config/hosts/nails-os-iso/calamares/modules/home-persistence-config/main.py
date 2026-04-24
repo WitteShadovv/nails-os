@@ -6,72 +6,15 @@
 # Shows a UI for the user to choose between selective home persistence
 # (default) or full home persistence.
 #
-# The choice is written to /tmp/calamares-home-persistence-config.ini so the
-# nails-os exec module can read it.
+import os
+import sys
 
-import configparser
-import libcalamares
-
-try:
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QFont
-    from PySide6.QtWidgets import (
-        QWidget,
-        QVBoxLayout,
-        QHBoxLayout,
-        QLabel,
-        QRadioButton,
-        QButtonGroup,
-        QFrame,
-        QPushButton,
-        QScrollArea,
-    )
-except ImportError:
-    from PySide2.QtCore import Qt
-    from PySide2.QtGui import QFont
-    from PySide2.QtWidgets import (
-        QWidget,
-        QVBoxLayout,
-        QHBoxLayout,
-        QLabel,
-        QRadioButton,
-        QButtonGroup,
-        QFrame,
-        QPushButton,
-        QScrollArea,
-    )
-
-_HOME_PERSISTENCE_CONFIG_PATH = "/tmp/calamares-home-persistence-config.ini"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from nails_ui_common import *  # noqa: F401,F403,E402
 
 
 def pretty_name():
     return "Home Persistence"
-
-
-def _write_ini(full_persistence: bool) -> None:
-    cp = configparser.ConfigParser()
-    cp["General"] = {"fullPersistence": "true" if full_persistence else "false"}
-    with open(_HOME_PERSISTENCE_CONFIG_PATH, "w") as fh:
-        cp.write(fh)
-
-
-class OptionCard(QFrame):
-    """A styled card widget for displaying an option."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        self.setStyleSheet("""
-            OptionCard {
-                background-color: #222244;
-                border: 1px solid #444466;
-                border-radius: 8px;
-                padding: 12px;
-            }
-            OptionCard:hover {
-                background-color: #2a2a4e;
-            }
-        """)
 
 
 class CollapsibleSection(QWidget):
@@ -132,8 +75,6 @@ class HomePersistenceConfigWidget(QWidget):
         super().__init__()
         self._full_persistence = False  # Default: selective
         self._build_ui()
-        # Write the default immediately
-        _write_ini(False)
 
     def _build_ui(self):
         # Main layout with scroll area for long content
@@ -304,14 +245,12 @@ class HomePersistenceConfigWidget(QWidget):
     def _on_toggle(self, checked: bool):
         self._full_persistence = not checked
         self._warning_label.setVisible(not checked)
-        _write_ini(not checked)
 
     def full_persistence(self) -> bool:
         return self._full_persistence
 
     def set_full_persistence(self, full: bool):
         self._full_persistence = full
-        _write_ini(full)
 
 
 _widget = None
@@ -325,5 +264,4 @@ def create_widget():
 
 def leaving():
     """Called by Calamares when the user moves to the next step."""
-    if _widget is not None:
-        _write_ini(_widget.full_persistence())
+    pass

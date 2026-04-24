@@ -1,13 +1,14 @@
-{ config, lib, ... }: {
+{ config, lib, ... }:
+{
   options.nailsOs.shellHistory = {
-    disable = lib.mkOption {
+    enable = lib.mkOption {
       type = lib.types.bool;
-      default = true;
-      description = "Disable shell history for all shells (bash, zsh, fish).";
+      default = false;
+      description = "Enable shell history for all shells (bash, zsh, fish).";
     };
   };
 
-  config = lib.mkIf config.nailsOs.shellHistory.disable {
+  config = lib.mkIf (!config.nailsOs.shellHistory.enable) {
     # Defense layer 1: System-wide environment variables.
     # HISTFILE is intentionally NOT set here — setting it to /dev/null is
     # actively harmful: bash will delete the device node when it truncates an

@@ -1,0 +1,419 @@
+name: Build NAILS OS ISO (PR-safe reusable)
+
+on:
+  workflow_call:
+    inputs:
+      checkout_repository:
+        description: "Untrusted PR repository to checkout"
+        required: true
+        type: string
+      checkout_ref:
+        description: "Untrusted PR ref label for metadata"
+        required: true
+        type: string
+      checkout_sha:
+        description: "Untrusted PR exact SHA to validate"
+        required: true
+        type: string
+      comparison_base_sha:
+        description: "Trusted base SHA for diff-based PR checks"
+        required: true
+        type: string
+      pr_number:
+        description: "Pull request number"
+        required: true
+        type: string
+      trusted_reason:
+        description: "Human-readable execution rationale"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: build-iso-pr-safe-${{ inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-run-context:
+    name: Resolve safe PR run context
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run_mode: ${{ steps.resolve.outputs.run_mode }}
+      reason: ${{ steps.resolve.outputs.reason }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      checkout_repository: ${{ steps.resolve.outputs.checkout_repository }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
+      checkout_sha: ${{ steps.resolve.outputs.checkout_sha }}
+      comparison_base_sha: ${{ steps.resolve.outputs.comparison_base_sha }}
+      workflow_changed: ${{ steps.resolve.outputs.workflow_changed }}
+      changed_files: ${{ steps.resolve.outputs.changed_files }}
+    steps:
+      - name: Resolve and validate PR metadata
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_CHECKOUT_REPOSITORY: ${{ inputs.checkout_repository }}
+          INPUT_CHECKOUT_REF: ${{ inputs.checkout_ref }}
+          INPUT_CHECKOUT_SHA: ${{ inputs.checkout_sha }}
+          INPUT_COMPARISON_BASE_SHA: ${{ inputs.comparison_base_sha }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_TRUSTED_REASON: ${{ inputs.trusted_reason }}
+        run: |
+          python3 <<'PY'
+          import fnmatch
+          import json
+          import os
+          import re
+          import urllib.request
+
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          token = os.environ["GITHUB_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          output_path = os.environ["GITHUB_OUTPUT"]
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+
+          pr_number = os.environ["INPUT_PR_NUMBER"]
+          checkout_repository = os.environ["INPUT_CHECKOUT_REPOSITORY"]
+          checkout_ref = os.environ["INPUT_CHECKOUT_REF"]
+          checkout_sha = os.environ["INPUT_CHECKOUT_SHA"]
+          comparison_base_sha = os.environ["INPUT_COMPARISON_BASE_SHA"]
+          trusted_reason = os.environ.get("INPUT_TRUSTED_REASON", "")
+
+          workflow_patterns = [
+              ".github/workflows/*.yml",
+              ".github/workflows/*.yaml",
+          ]
+
+          def write_output(name, value):
+              value = "" if value is None else str(value)
+              with open(output_path, "a", encoding="utf-8") as fh:
+                  if "\n" in value:
+                      fh.write(f"{name}<<EOF\n{value}\nEOF\n")
+                  else:
+                      fh.write(f"{name}={value}\n")
+
+          def is_full_sha(value):
+              return bool(re.fullmatch(r"[0-9a-f]{40}", value or ""))
+
+          def is_repo_slug(value):
+              return bool(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value or ""))
+
+          def api_get(path):
+              request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          if not pr_number.isdigit():
+              raise SystemExit(f"Invalid pull request number: {pr_number!r}")
+          if not is_repo_slug(checkout_repository):
+              raise SystemExit(f"Invalid checkout repository: {checkout_repository!r}")
+          if not checkout_ref:
+              raise SystemExit("checkout_ref is required")
+          if not is_full_sha(checkout_sha):
+              raise SystemExit(f"Invalid checkout SHA: {checkout_sha!r}")
+          if not is_full_sha(comparison_base_sha):
+              raise SystemExit(f"Invalid comparison base SHA: {comparison_base_sha!r}")
+
+          pr = api_get(f"/repos/{repo}/pulls/{pr_number}")
+          if pr["state"] != "open":
+              raise SystemExit(f"PR #{pr_number} is no longer open.")
+          if pr["base"]["ref"] != "main":
+              raise SystemExit(f"PR #{pr_number} no longer targets main.")
+          if pr["head"]["repo"]["full_name"] != checkout_repository:
+              raise SystemExit("checkout_repository does not match the live PR head repository.")
+          if pr["head"]["ref"] != checkout_ref:
+              raise SystemExit("checkout_ref does not match the live PR head ref.")
+          if pr["head"]["sha"] != checkout_sha:
+              raise SystemExit("checkout_sha does not match the live PR head SHA.")
+          live_base_sha = pr["base"]["sha"]
+          comparison_base_sha_stale = comparison_base_sha != live_base_sha
+
+          changed_files = []
+          page = 1
+          while True:
+              page_items = api_get(f"/repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}")
+              if not page_items:
+                  break
+              changed_files.extend(page_items)
+              if len(page_items) < 100:
+                  break
+              page += 1
+
+          executable_statuses = {"added", "copied", "modified", "renamed"}
+          changed_paths = [
+              item["filename"]
+              for item in changed_files
+              if item.get("status", "") in executable_statuses
+          ]
+          workflow_changed = any(
+              any(fnmatch.fnmatch(path, pattern) for pattern in workflow_patterns)
+              for path in changed_paths
+          )
+
+          reason = trusted_reason or (
+              f"Validated PR-safe workflow_call for PR #{pr_number}; run only unprivileged GitHub-hosted validation against exact SHA {checkout_sha}."
+          )
+
+          write_output("run_mode", "pr")
+          write_output("reason", reason)
+          write_output("pr_number", pr_number)
+          write_output("checkout_repository", checkout_repository)
+          write_output("checkout_ref", checkout_ref)
+          write_output("checkout_sha", checkout_sha)
+          write_output("comparison_base_sha", comparison_base_sha)
+          write_output("comparison_base_sha_stale", "true" if comparison_base_sha_stale else "false")
+          write_output("workflow_changed", "true" if workflow_changed else "false")
+          write_output("changed_files", "\n".join(changed_paths))
+
+          with open(summary_path, "a", encoding="utf-8") as summary:
+              summary.write("## Safe PR run context\n\n")
+              summary.write("This workflow validates untrusted PR code only on GitHub-hosted runners without secrets.\n\n")
+              summary.write("| Property | Value |\n")
+              summary.write("|---|---|\n")
+              summary.write(f"| PR number | `#{pr_number}` |\n")
+              summary.write(f"| Checkout repository | `{checkout_repository}` |\n")
+              summary.write(f"| Checkout ref | `{checkout_ref}` |\n")
+              summary.write(f"| Checkout SHA | `{checkout_sha}` |\n")
+              summary.write(f"| Comparison base SHA | `{comparison_base_sha}` |\n")
+              summary.write(f"| Live PR base SHA | `{live_base_sha}` |\n")
+              summary.write(f"| Comparison base SHA stale | `{'true' if comparison_base_sha_stale else 'false'}` |\n")
+              summary.write(f"| Workflow files changed | `{'true' if workflow_changed else 'false'}` |\n")
+              summary.write(f"| Reason | {reason} |\n")
+          PY
+
+  python-tests:
+    name: Python unit tests
+    needs: resolve-run-context
+    if: needs.resolve-run-context.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ needs.resolve-run-context.outputs.checkout_repository }}
+          ref: ${{ needs.resolve-run-context.outputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify checked out revision
+        run: |
+          set -euo pipefail
+          expected_sha='${{ needs.resolve-run-context.outputs.checkout_sha }}'
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$expected_sha" ]]; then
+            echo "::error::Checked out SHA '$actual_sha' does not match expected '$expected_sha'."
+            exit 1
+          fi
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run Python unit tests
+        run: pytest tests/ -v
+
+  workflow-lint:
+    name: Workflow lint
+    needs: resolve-run-context
+    if: needs.resolve-run-context.result == 'success' && needs.resolve-run-context.outputs.workflow_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ needs.resolve-run-context.outputs.checkout_repository }}
+          ref: ${{ needs.resolve-run-context.outputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify checked out revision
+        run: |
+          set -euo pipefail
+          expected_sha='${{ needs.resolve-run-context.outputs.checkout_sha }}'
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$expected_sha" ]]; then
+            echo "::error::Checked out SHA '$actual_sha' does not match expected '$expected_sha'."
+            exit 1
+          fi
+      - name: Install Nix
+        uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+      - name: Run actionlint on workflow files
+        run: |
+          set -euo pipefail
+          mapfile -t workflow_files < <(printf '%s\n' "${{ needs.resolve-run-context.outputs.changed_files }}" | grep -E '^\.github/workflows/.*\.ya?ml$' || true)
+          if [ "${#workflow_files[@]}" -eq 0 ]; then
+            echo "No changed workflow files detected after filtering; skipping actionlint."
+            exit 0
+          fi
+          printf 'Linting workflow files:\n'
+          printf ' - %s\n' "${workflow_files[@]}"
+          nix shell nixpkgs#actionlint -c actionlint -shellcheck= -pyflakes= "${workflow_files[@]}"
+
+  pre-commit-safe:
+    name: Pre-commit safe checks
+    needs: resolve-run-context
+    if: needs.resolve-run-context.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ needs.resolve-run-context.outputs.checkout_repository }}
+          ref: ${{ needs.resolve-run-context.outputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify checked out revision
+        run: |
+          set -euo pipefail
+          expected_sha='${{ needs.resolve-run-context.outputs.checkout_sha }}'
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$expected_sha" ]]; then
+            echo "::error::Checked out SHA '$actual_sha' does not match expected '$expected_sha'."
+            exit 1
+          fi
+      - name: Install Nix
+        uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+      - name: Run safe pre-commit hooks on changed files
+        env:
+          CHANGED_FILES: ${{ needs.resolve-run-context.outputs.changed_files }}
+        run: |
+          set -euo pipefail
+          changed_files=()
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              changed_files+=("$path")
+            fi
+          done <<< "${CHANGED_FILES:-}"
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "No changed files detected; skipping pre-commit."
+            exit 0
+          fi
+          safe_hooks=(
+            trailing-whitespace
+            end-of-file-fixer
+            check-yaml
+            check-json
+            check-merge-conflict
+            check-case-conflict
+            check-symlinks
+            check-added-large-files
+            detect-secrets
+            tracked-cleanliness-guard
+          )
+          for hook in "${safe_hooks[@]}"; do
+            echo "Running pre-commit hook: $hook"
+            nix develop ./nix-config -c pre-commit run "$hook" --files "${changed_files[@]}"
+          done
+
+  nix-eval-safe:
+    name: Safe Nix evaluation checks
+    needs: resolve-run-context
+    if: needs.resolve-run-context.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ needs.resolve-run-context.outputs.checkout_repository }}
+          ref: ${{ needs.resolve-run-context.outputs.checkout_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify checked out revision
+        run: |
+          set -euo pipefail
+          expected_sha='${{ needs.resolve-run-context.outputs.checkout_sha }}'
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$expected_sha" ]]; then
+            echo "::error::Checked out SHA '$actual_sha' does not match expected '$expected_sha'."
+            exit 1
+          fi
+      - name: Install Nix
+        uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+      - name: Evaluate ISO package
+        run: nix --option accept-flake-config false eval ./nix-config#packages.x86_64-linux.nails-os-iso.drvPath
+      - name: Evaluate primary NixOS configuration
+        run: nix --option accept-flake-config false eval ./nix-config#nixosConfigurations.nails-os.config.system.build.toplevel.drvPath
+
+  pr-safe-result:
+    name: PR-safe ISO validation result
+    needs:
+      - resolve-run-context
+      - python-tests
+      - workflow-lint
+      - pre-commit-safe
+      - nix-eval-safe
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve safe PR workflow outcome
+        env:
+          RESOLVE_RESULT: ${{ needs.resolve-run-context.result }}
+          PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}
+          WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
+          PRE_COMMIT_RESULT: ${{ needs.pre-commit-safe.result }}
+          NIX_EVAL_RESULT: ${{ needs.nix-eval-safe.result }}
+          WORKFLOW_CHANGED: ${{ needs.resolve-run-context.outputs.workflow_changed }}
+          TRUST_REASON: ${{ needs.resolve-run-context.outputs.reason }}
+        run: |
+          set -euo pipefail
+          {
+            cat <<'EOF'
+          ## PR-safe ISO validation result
+
+          | Job | Result |
+          |---|---|
+          EOF
+            printf '| Resolve safe PR run context | `%s` |\n' "${RESOLVE_RESULT}"
+            printf '| Python unit tests | `%s` |\n' "${PYTHON_TESTS_RESULT}"
+            printf '| Workflow lint | `%s` |\n' "${WORKFLOW_LINT_RESULT}"
+            printf '| Pre-commit safe checks | `%s` |\n' "${PRE_COMMIT_RESULT}"
+            printf '| Safe Nix evaluation checks | `%s` |\n' "${NIX_EVAL_RESULT}"
+            printf '| Workflow files changed | `%s` |\n' "${WORKFLOW_CHANGED}"
+            printf '\n%s\n' "${TRUST_REASON}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${RESOLVE_RESULT}" != 'success' ]]; then
+            echo "::error::Failed to resolve the safe PR run context."
+            exit 1
+          fi
+          if [[ "${PYTHON_TESTS_RESULT}" != 'success' ]]; then
+            echo "::error::Python unit tests did not complete successfully."
+            exit 1
+          fi
+          if [[ "${WORKFLOW_CHANGED}" == 'true' && "${WORKFLOW_LINT_RESULT}" != 'success' ]]; then
+            echo "::error::Workflow file changes require successful workflow linting."
+            exit 1
+          fi
+          if [[ "${PRE_COMMIT_RESULT}" != 'success' ]]; then
+            echo "::error::Safe pre-commit checks did not complete successfully."
+            exit 1
+          fi
+          if [[ "${NIX_EVAL_RESULT}" != 'success' ]]; then
+            echo "::error::Safe Nix evaluation checks did not complete successfully."
+            exit 1
+          fi
+          echo "PR-safe ISO validation workflow completed successfully."

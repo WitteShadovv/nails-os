@@ -1,0 +1,280 @@
+name: Build NAILS OS ISO (main)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nix-config/**'
+      - '.github/workflows/build-iso.yml'
+      - '.github/workflows/build-iso-main.yml'
+      - '.github/workflows/build-iso-pr.yml'
+      - '.github/workflows/build-iso-pr-safe.yml'
+      - '.github/workflows/build-iso-pr-approved.yml'
+      - '.github/workflows/build-iso-pr-trusted.yml'
+      - '.github/workflows/release.yml'
+      - '.pre-commit-config.yaml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: build-iso-main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ISO on trusted main
+    uses: ./.github/workflows/build-iso.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      verify_reproducibility: true
+      r2_prefix: latest
+    secrets:
+      PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      HCLOUD_SSH_KEY_ID: ${{ secrets.HCLOUD_SSH_KEY_ID }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+  publish-latest:
+    name: Publish rolling latest release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Download build metadata artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: nails-os-iso-${{ github.sha }}
+          path: dist
+
+      - name: Install GitHub CLI for publish
+        run: |
+          set -euo pipefail
+          WORKDIR=$(mktemp -d)
+          trap 'rm -rf "$WORKDIR"' EXIT
+          export GNUPGHOME="$WORKDIR/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+
+          KEYRING_URL='https://cli.github.com/packages/githubcli-archive-keyring.gpg'
+          KEYRING_PATH="$WORKDIR/githubcli-archive-keyring.gpg"
+          curl -fsSL "$KEYRING_URL" -o "$KEYRING_PATH"
+
+          EXPECTED_FINGERPRINTS=$(printf '%s\n' \
+            '2C6106201985B60E6C7AC87323F3D4EA75716059' \
+            '7F38BBB59D064DBCB3D84D725612B36462313325' | sort) # pragma: allowlist secret
+
+          gpg --batch --import "$KEYRING_PATH" >/dev/null 2>&1
+          ACTUAL_FINGERPRINTS=$(gpg --batch --with-colons --fingerprint | awk -F: '
+            $1 == "pub" { want = 1; next }
+            $1 == "fpr" && want { print $10; want = 0 }
+          ' | sort)
+
+          if [ "$ACTUAL_FINGERPRINTS" != "$EXPECTED_FINGERPRINTS" ]; then
+            echo "::error::GitHub CLI archive signing key fingerprint mismatch"
+            echo "Expected fingerprints:"
+            printf '%s\n' "$EXPECTED_FINGERPRINTS"
+            echo "Actual fingerprints:"
+            printf '%s\n' "$ACTUAL_FINGERPRINTS"
+            exit 1
+          fi
+
+          sudo install -d -m 755 /etc/apt/keyrings
+          sudo install -m 644 "$KEYRING_PATH" /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' "$(dpkg --print-architecture)" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          printf '%s\n' \
+            'Package: gh' \
+            'Pin: origin cli.github.com' \
+            'Pin-Priority: 1001' \
+            | sudo tee /etc/apt/preferences.d/github-cli > /dev/null
+          sudo apt-get update -qq
+
+          policy_has_github_cli_repo_for_version() {
+            local policy_file="$1"
+            local version="$2"
+
+            awk -v version="$version" '
+              BEGIN { in_version = 0; found = 0 }
+              /^[[:space:]]*(\*\*\*[[:space:]]+)?[^[:space:]]+[[:space:]]+[0-9]+$/ {
+                if ($1 == version || ($1 == "***" && $2 == version)) {
+                  in_version = 1
+                } else {
+                  in_version = 0
+                }
+              }
+              in_version && $2 == "https://cli.github.com/packages" { found = 1 }
+              END { exit(found ? 0 : 1) }
+            ' "$policy_file"
+          }
+
+          shopt -s nullglob
+          inrelease_files=(/var/lib/apt/lists/*cli.github.com*_InRelease)
+          shopt -u nullglob
+          if [ "${#inrelease_files[@]}" -eq 0 ]; then
+            echo "::error::GitHub CLI apt InRelease metadata was not downloaded"
+            exit 1
+          fi
+
+          if ! awk '
+            BEGIN { origin = 0; label = 0 }
+            /^Origin: gh$/ { origin = 1 }
+            /^Label: gh$/ { label = 1 }
+            END { exit(origin && label ? 0 : 1) }
+          ' "${inrelease_files[0]}"; then
+            echo "::error::GitHub CLI apt repository metadata did not match expected Origin/Label"
+            exit 1
+          fi
+
+          POLICY_BEFORE="$WORKDIR/apt-policy-gh-before.txt"
+          apt-cache policy gh | tee "$POLICY_BEFORE"
+          CANDIDATE_VERSION=$(awk '/Candidate:/ { print $2 }' "$POLICY_BEFORE")
+          if [ -z "$CANDIDATE_VERSION" ] || [ "$CANDIDATE_VERSION" = '(none)' ]; then
+            echo "::error::No gh install candidate is available after configuring the GitHub CLI apt repository"
+            exit 1
+          fi
+          if ! policy_has_github_cli_repo_for_version "$POLICY_BEFORE" "$CANDIDATE_VERSION"; then
+            echo "::error::gh candidate $CANDIDATE_VERSION is not attributed to https://cli.github.com/packages in apt policy"
+            exit 1
+          fi
+
+          sudo apt-get install -y --no-install-recommends gh
+
+          POLICY_AFTER="$WORKDIR/apt-policy-gh-after.txt"
+          apt-cache policy gh | tee "$POLICY_AFTER"
+          INSTALLED_VERSION=$(awk '/Installed:/ { print $2 }' "$POLICY_AFTER")
+          POST_INSTALL_CANDIDATE=$(awk '/Candidate:/ { print $2 }' "$POLICY_AFTER")
+
+          if [ -z "$INSTALLED_VERSION" ] || [ "$INSTALLED_VERSION" = '(none)' ]; then
+            echo "::error::gh was not installed"
+            exit 1
+          fi
+          if [ "$INSTALLED_VERSION" != "$POST_INSTALL_CANDIDATE" ]; then
+            echo "::error::Installed gh version $INSTALLED_VERSION does not match the verified candidate $POST_INSTALL_CANDIDATE"
+            exit 1
+          fi
+          if ! policy_has_github_cli_repo_for_version "$POLICY_AFTER" "$INSTALLED_VERSION"; then
+            echo "::error::Installed gh version $INSTALLED_VERSION is not attributed to https://cli.github.com/packages in apt policy"
+            exit 1
+          fi
+
+          gh --version
+
+      - name: Publish to latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+          R2_ISO_NAME: ${{ needs.build.outputs.r2_iso_name }}
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          TAG="latest-${SHORT_SHA}"
+          TITLE="NAILS OS (${SHORT_SHA})"
+
+          echo "::group::Preparing release metadata"
+          for f in checksums.txt build-metadata.json; do
+            if [ ! -f "dist/$f" ]; then
+              echo "::error::Missing required metadata file: $f"
+              exit 1
+            fi
+          done
+
+          ISO_NAME="${R2_ISO_NAME}"
+          if [ -z "${ISO_NAME}" ]; then
+            ISO_NAME=$(jq -r '.iso.filename // "unknown.iso"' dist/build-metadata.json)
+          fi
+          ISO_SHA256=$(awk '{print $1}' dist/checksums.txt | head -1)
+          ISO_SIZE_MB=$(jq -r '(.iso.size_bytes // 0) | . / 1048576 | floor' dist/build-metadata.json)
+          echo "ISO name: $ISO_NAME"
+          ls -lh dist/
+          echo "::endgroup::"
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "::notice::Release ${TAG} already exists — skipping (idempotent)."
+            RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
+            echo "::notice::Existing release: $RELEASE_URL"
+            exit 0
+          fi
+
+          if [ -n "${R2_PUBLIC_URL:-}" ]; then
+            DOWNLOAD_LINK="[**Download ${ISO_NAME}**](${R2_PUBLIC_URL}/latest/${ISO_NAME})"
+          else
+            DOWNLOAD_LINK="> R2 public URL not configured — ISO was uploaded to R2 but no public link is available."
+          fi
+
+          cat > /tmp/release-notes.md << EOF
+          Rolling build from \`main\` branch.
+
+          ${DOWNLOAD_LINK}
+
+          | Property | Value |
+          |----------|-------|
+          | **ISO filename** | \`${ISO_NAME}\` |
+          | **ISO SHA256** | \`${ISO_SHA256}\` |
+          | **ISO size** | ${ISO_SIZE_MB} MB |
+          | **Commit** | [\`${SHORT_SHA}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
+          | **Ref** | \`${{ github.ref_name }}\` |
+          | **Built** | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
+
+          ### Verify integrity
+
+          After downloading the ISO and \`checksums.txt\` from this release:
+          \`\`\`bash
+          sha256sum -c checksums.txt
+          \`\`\`
+
+          > This is an automated pre-release from \`main\`.
+          > For stable releases, see the versioned tags (\`v*\`).
+          EOF
+
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "$TITLE" \
+            --notes-file /tmp/release-notes.md \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            dist/checksums.txt dist/build-metadata.json
+
+          RELEASE_URL=$(gh release view "$TAG" --repo "${{ github.repository }}" --json url --jq '.url' 2>/dev/null || echo "(URL unavailable)")
+          echo "::notice::Published release: $RELEASE_URL"
+
+  build-iso-main-result:
+    name: Build ISO main result
+    needs: [build, publish-latest]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve main workflow outcome
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          PUBLISH_RESULT: ${{ needs.publish-latest.result }}
+        run: |
+          set -euo pipefail
+          {
+            cat <<'EOF'
+          ## Build ISO main workflow result
+
+          | Job | Result |
+          |---|---|
+          EOF
+            printf '| Trusted build workflow | `%s` |\n' "${BUILD_RESULT}"
+            printf '| Publish rolling latest release | `%s` |\n' "${PUBLISH_RESULT}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${BUILD_RESULT}" != 'success' ]]; then
+            echo "::error::Trusted build workflow did not complete successfully."
+            exit 1
+          fi
+          if [[ "${PUBLISH_RESULT}" != 'success' ]]; then
+            echo "::error::Rolling latest release publication did not complete successfully."
+            exit 1
+          fi
+          echo "Trusted main ISO workflow completed successfully."

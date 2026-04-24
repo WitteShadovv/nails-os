@@ -1,6 +1,11 @@
-# Security Operations Documentation
+# Security Documentation Hub
 
-Operational security docs for SBOM, dependency hygiene, and vulnerability handling.
+Canonical current documentation for SBOM, dependency hygiene, vulnerability handling, and security validation.
+
+> [!IMPORTANT]
+> This `docs/security/` directory is the authoritative documentation path for current SBOM and security operations guidance.
+>
+> The older [`../SBOM-DEPENDENCY-VULNERABILITY-ARCHITECTURE.md`](../SBOM-DEPENDENCY-VULNERABILITY-ARCHITECTURE.md) file is retained only as archival design/reference context and may describe proposed or superseded workflows.
 
 ## Scope
 
@@ -28,11 +33,13 @@ Use these project interfaces and artifact names in docs, CI, and release workflo
 | vulnix scan command | `nix run ./nix-config#vulnix-scan -- <target> <output>` |
 | SBOM artifact filename | `dist/nails-os-sbom.cdx.json` |
 | vulnix results filename | `dist/vulnix-results.json` |
+| CI/release security artifact path | Cloudflare R2 `${R2_PREFIX}/security/` (for example `stable/security/nails-os-sbom.cdx.json`) |
 
 ## Public Policy
 
 - Public vulnerability policy and reporting SLA: [`../../SECURITY.md`](../../SECURITY.md)
-- BIOS/legacy boot limitation notes: [`../SECURITY.md`](../SECURITY.md)
+- BIOS/legacy boot limitation notes: [`../BIOS-SECURITY.md`](../BIOS-SECURITY.md)
+- Archival design/reference context: [`../SBOM-DEPENDENCY-VULNERABILITY-ARCHITECTURE.md`](../SBOM-DEPENDENCY-VULNERABILITY-ARCHITECTURE.md)
 
 ## Ownership and Maintenance Cadence
 

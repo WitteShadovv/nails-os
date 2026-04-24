@@ -1,4 +1,9 @@
-{ pkgs, lib, modulesPath, ... }:
+{
+  pkgs,
+  lib,
+  modulesPath,
+  ...
+}:
 let
   # ---------------------------------------------------------------------------
   # Our Calamares extensions (module + branding + config), built as a
@@ -17,9 +22,6 @@ let
       cp -r modules/nails-os/. $out/lib/calamares/modules/nails-os/
 
       # Custom viewmodules  →  $out/lib/calamares/modules/<name>/
-      mkdir -p $out/lib/calamares/modules/tor-config
-      cp -r modules/tor-config/. $out/lib/calamares/modules/tor-config/
-
       mkdir -p $out/lib/calamares/modules/history-config
       cp -r modules/history-config/. $out/lib/calamares/modules/history-config/
 
@@ -92,7 +94,8 @@ let
       calamares
   '';
 
-in {
+in
+{
   imports = [
     "${modulesPath}/installer/cd-dvd/installation-cd-graphical-calamares-gnome.nix"
     ../../modules/base.nix
@@ -115,7 +118,10 @@ in {
   networking.hostName = "nails-installer";
 
   # Forward kernel messages to serial so we can observe boot/hang in VMs.
-  boot.kernelParams = [ "console=ttyS0,115200" "console=tty1" ];
+  boot.kernelParams = [
+    "console=ttyS0,115200"
+    "console=tty1"
+  ];
 
   # Disable nix channel initialisation — we are flake-based and the channel
   # setup produces spurious symlink errors on the live ISO.
@@ -153,25 +159,29 @@ in {
       # so our settings.conf is found first, then fall back to upstream modules.
       # XDG_DATA_DIRS is additive (both sets of QML/branding assets are needed),
       # so we keep --prefix there.
-      calamares-nixos = let
-        ext = nailsCalamaresExtensions;
-        upstExt = prev.calamares-nixos-extensions;
-        rawBin = "${prev.calamares}/bin/calamares";
-      in prev.runCommand "calamares-nails-wrapped" {
-        nativeBuildInputs = [ prev.makeWrapper ];
-      } ''
-        mkdir -p $out/bin
-        for i in $(ls ${prev.calamares-nixos}); do
-          if [ "$i" != "bin" ]; then
-            ln -s ${prev.calamares-nixos}/$i $out/$i
-          fi
-        done
-        makeWrapper ${rawBin} $out/bin/calamares \
-          --prefix XDG_DATA_DIRS   : "${upstExt}/share" \
-          --prefix XDG_DATA_DIRS   : "${ext}/share" \
-          --prefix XDG_CONFIG_DIRS : "${ext}/etc" \
-          --add-flags "--xdg-config"
-      '';
+      calamares-nixos =
+        let
+          ext = nailsCalamaresExtensions;
+          upstExt = prev.calamares-nixos-extensions;
+          rawBin = "${prev.calamares}/bin/calamares";
+        in
+        prev.runCommand "calamares-nails-wrapped"
+          {
+            nativeBuildInputs = [ prev.makeWrapper ];
+          }
+          ''
+            mkdir -p $out/bin
+            for i in $(ls ${prev.calamares-nixos}); do
+              if [ "$i" != "bin" ]; then
+                ln -s ${prev.calamares-nixos}/$i $out/$i
+              fi
+            done
+            makeWrapper ${rawBin} $out/bin/calamares \
+              --prefix XDG_DATA_DIRS   : "${upstExt}/share" \
+              --prefix XDG_DATA_DIRS   : "${ext}/share" \
+              --prefix XDG_CONFIG_DIRS : "${ext}/etc" \
+              --add-flags "--xdg-config"
+          '';
     })
   ];
 

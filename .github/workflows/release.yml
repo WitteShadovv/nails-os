@@ -56,20 +56,16 @@ jobs:
   build:
     name: Build ISO
     uses: ./.github/workflows/build-iso.yml
-    # Grant the permissions that build-iso.yml's jobs declare:
-    #   - contents: read  (top-level default in build-iso.yml)
-    #   - contents: write (publish-latest job in build-iso.yml)
-    # The caller must grant the union of all permissions the callee may use.
-    # publish-latest only runs on push-to-main (not on workflow_call), but
-    # GitHub validates declared permissions at parse time regardless of `if`.
     permissions:
-      contents: write
+      contents: read
+      pull-requests: read
     with:
       verify_reproducibility: true
       r2_prefix: "stable"
     secrets:
       PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      HCLOUD_SSH_KEY_ID: ${{ secrets.HCLOUD_SSH_KEY_ID }}
       R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -92,7 +88,7 @@ jobs:
       # 1. Checkout — required for `gh` CLI repository context
       # -----------------------------------------------------------------------
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -447,11 +443,21 @@ jobs:
           R2_ISO_NAME: ${{ needs.build.outputs.r2_iso_name }}
           R2_UPLOADED: ${{ needs.build.outputs.r2_uploaded }}
         run: |
+          set -euo pipefail
           echo "R2_UPLOADED=${R2_UPLOADED:-<empty>}"
           echo "R2_ISO_NAME=${R2_ISO_NAME:-<empty>}"
           echo "R2_PUBLIC_URL=${R2_PUBLIC_URL:+set (redacted)}"
           if [ "${R2_UPLOADED}" != "true" ]; then
-            echo "::warning::R2 upload output is '${R2_UPLOADED}' (expected 'true'). Download link may fall back to build-metadata.json."
+            echo "::error::Stable release publication requires R2 upload output 'true'."
+            exit 1
+          fi
+          if [ -z "${R2_ISO_NAME}" ]; then
+            echo "::error::Stable release publication requires a non-empty R2 ISO output name."
+            exit 1
+          fi
+          if [ -z "${R2_PUBLIC_URL:-}" ]; then
+            echo "::error::Stable release publication requires R2_PUBLIC_URL to generate the published download link."
+            exit 1
           fi
 
       - name: Generate release notes
@@ -498,17 +504,6 @@ jobs:
           r2_vuln_uploaded = os.environ.get("R2_VULN_UPLOADED", "false")
           vuln_summary = os.environ.get("VULN_SUMMARY", "unknown")
           dep_diff_section = os.environ.get("DEPENDENCY_DIFF_SECTION", "### Dependency Diff\n\n- Unavailable.\n")
-
-          # Fall back to build-metadata.json for ISO filename if R2 output is missing
-          if not r2_iso_name:
-              try:
-                  with open("dist/build-metadata.json") as f:
-                      meta = json.load(f)
-                  r2_iso_name = meta.get("iso", {}).get("filename", "")
-                  if r2_iso_name:
-                      print(f"::notice::R2_ISO_NAME was empty, resolved from build-metadata.json: {r2_iso_name}")
-              except Exception as e:
-                  print(f"::warning::Could not read ISO name from build-metadata.json: {e}")
 
           if repro_status == "true":
               repro_badge = "Reproducible build verified"

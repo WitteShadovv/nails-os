@@ -1,1 +1,28 @@
 result
+.direnv/
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.envrc
+.idea/
+.vscode/
+*.swp
+
+# Local tooling state
+.claude/
+.codex
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Build artifacts
+dist/
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo

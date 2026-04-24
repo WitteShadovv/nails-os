@@ -1,4 +1,5 @@
-{ lib, ... }: {
+{ lib, ... }:
+{
   options.nailsOs.homePersistence = {
     selective = lib.mkOption {
       type = lib.types.bool;

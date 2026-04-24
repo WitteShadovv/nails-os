@@ -1,20 +1,44 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 let
   torTransPort = 9040;
   torDNSPort = 8853;
   torUid = config.users.users.tor.uid;
   clearnetUid = config.users.users.clearnet.uid;
   rfc1918 = "{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }";
-  transportPlugins = lib.flatten [
-    (lib.optional (pkgs ? obfs4) "obfs4 exec ${pkgs.obfs4}/bin/lyrebird")
-    (lib.optional (pkgs ? snowflake)
-      "snowflake exec ${pkgs.snowflake}/bin/client")
+
+  # External DNS resolver used by the tor uid for PT bootstrap (e.g. snowflake
+  # broker resolution) before any Tor circuit exists.  Quad9 is a non-logging,
+  # DNSSEC-validating resolver operated by the Quad9 Foundation (Swiss non-profit).
+  quad9 = "9.9.9.9";
+  transportPlugins = [
+    "obfs4 exec ${pkgs.obfs4}/bin/lyrebird"
+    "snowflake exec ${pkgs.snowflake}/bin/client"
   ];
   # ---------------------------------------------------------------------------
   # Default bridges from Tor Browser's pt_config.json — the same set that
   # Tails and Tor Browser ship.  These are the Tor Project's official
   # "default bridges" maintained by the Anti-Censorship Team and explicitly
   # intended for embedding in client software.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Bridge maintenance guide
+  # ---------------------------------------------------------------------------
+  # WHERE:   https://bridges.torproject.org/ (select obfs4 or snowflake)
+  #          or email bridges@torproject.org with "get transport obfs4" in body.
+  # HOW:     Replace the bridge lines below with the new descriptors.  Each
+  #          line is a single string in Tor's "Bridge" format.  For snowflake,
+  #          update the structured attrs and the broker URL / fronts / ICE list.
+  # WHEN:    Review at every NAILS OS release.  Replace sooner if Tor Browser
+  #          ships a newer default set (check tor-browser-build.git
+  #          projects/common/bridges_list.*) or if users report connection
+  #          failures indicating bridges are blocked or offline.
+  # LAST UPDATED: 2025-10-01 (from Tor Browser 14.x pt_config.json)
   # ---------------------------------------------------------------------------
 
   # obfs4 bridges (7) — most stable transport, simple TCP obfuscation.
@@ -34,8 +58,15 @@ let
   # utls-imitate) are required so that snowflake-client knows how to reach the
   # broker; without them it falls back to stale compiled-in defaults and exits
   # immediately after PT initialisation (the "died in state Completed" loop).
-  mkSnowflakeBridge = { addr, fingerprint, url, fronts, ice
-    , utlsImitate ? "hellorandomizedalpn" }:
+  mkSnowflakeBridge =
+    {
+      addr,
+      fingerprint,
+      url,
+      fronts,
+      ice,
+      utlsImitate ? "hellorandomizedalpn",
+    }:
     lib.concatStringsSep " " [
       "snowflake ${addr} ${fingerprint}"
       "fingerprint=${fingerprint}"
@@ -50,7 +81,10 @@ let
   # and a central broker; connection setup is slower than obfs4.
   # (Bug 41609, Oct 2025 — CDN77 broker with datapacket.com fronts.)
   commonBrokerUrl = "https://1098762253.rsc.cdn77.org/";
-  commonFronts = [ "app.datapacket.com" "www.datapacket.com" ];
+  commonFronts = [
+    "app.datapacket.com"
+    "www.datapacket.com"
+  ];
   commonIce = [
     "stun:stun.epygi.com:3478"
     "stun:stun.uls.co.za:3478"
@@ -61,18 +95,18 @@ let
     "stun:stun.nextcloud.com:443"
   ];
   snowflakeBridges = map mkSnowflakeBridge [
-    { # snowflake-01
+    {
+      # snowflake-01
       addr = "192.0.2.3:80";
-      fingerprint =
-        "2B280B23E1107BB62ABFC40DDCC8824814F80A72"; # pragma: allowlist secret
+      fingerprint = "2B280B23E1107BB62ABFC40DDCC8824814F80A72"; # pragma: allowlist secret
       url = commonBrokerUrl;
       fronts = commonFronts;
       ice = commonIce;
     }
-    { # snowflake-02 (separate capacity, same broker)
+    {
+      # snowflake-02 (separate capacity, same broker)
       addr = "192.0.2.4:80";
-      fingerprint =
-        "8838024498816A039FCBBAB14E6F40A0843051FA"; # pragma: allowlist secret
+      fingerprint = "8838024498816A039FCBBAB14E6F40A0843051FA"; # pragma: allowlist secret
       url = commonBrokerUrl;
       fronts = commonFronts;
       ice = commonIce;
@@ -84,7 +118,8 @@ let
   unsafeBrowser = pkgs.writeShellScript "unsafe-browser" ''
     exec ${pkgs.util-linux}/bin/runuser -u clearnet -- ${pkgs.firefox}/bin/firefox "$@"
   '';
-in {
+in
+{
   options.nailsOs.tor = {
     enable = lib.mkOption {
       type = lib.types.bool;
@@ -126,7 +161,10 @@ in {
           # The tor uid bypasses that DNAT rule and uses the DHCP resolver directly
           # (see network.nix), so PT children like snowflake-client can reach the
           # Snowflake broker before any Tor circuit exists.
-          DNSPort = [ { port = torDNSPort; } { port = 53; } ];
+          DNSPort = [
+            { port = torDNSPort; }
+            { port = 53; }
+          ];
           AutomapHostsOnResolve = true;
           VirtualAddrNetworkIPv4 = "10.192.0.0/10";
 
@@ -139,8 +177,7 @@ in {
           # transparent proxy there is no trigger to wake it, so circuits would
           # never be built.
           DormantCanceledByStartup = true;
-          ClientTransportPlugin =
-            lib.mkIf config.nailsOs.tor.useBridges transportPlugins;
+          ClientTransportPlugin = lib.mkIf config.nailsOs.tor.useBridges transportPlugins;
           UseBridges = config.nailsOs.tor.useBridges;
           Bridge = lib.mkIf config.nailsOs.tor.useBridges defaultBridges;
         };
@@ -163,7 +200,7 @@ in {
               # Tor UID: redirect DNS to a real resolver so PTs (snowflake)
               # can resolve the broker before any Tor circuit exists.
               # Other tor traffic (bridge connections) goes directly.
-              meta skuid $tor_uid udp dport 53 dnat to 9.9.9.9:53
+              meta skuid $tor_uid udp dport 53 dnat to ${quad9}:53
               meta skuid $tor_uid return
 
               meta skuid $clearnet_uid return
@@ -178,9 +215,7 @@ in {
               # .onion virtual IPs (AutomapHostsOnResolve) live inside
               # 10.192.0.0/10 which overlaps with 10.0.0.0/8 in rfc1918.
               # Redirect them to TransPort BEFORE the RFC1918 exemption.
-              ip daddr 10.192.0.0/10 ip protocol tcp dnat to 127.0.0.1:${
-                toString torTransPort
-              }
+              ip daddr 10.192.0.0/10 ip protocol tcp dnat to 127.0.0.1:${toString torTransPort}
 
               ip daddr ${rfc1918} return
 

@@ -3,8 +3,12 @@ _: {
 
   boot = {
     kernelModules = [ "overlay" ];
-    blacklistedKernelModules =
-      [ "firewire_core" "firewire_ohci" "thunderbolt" "usb4" ];
+    blacklistedKernelModules = [
+      "firewire_core"
+      "firewire_ohci"
+      "thunderbolt"
+      "usb4"
+    ];
     kernelParams = [
       "init_on_free=1"
       "init_on_alloc=1"

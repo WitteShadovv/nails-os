@@ -4,7 +4,13 @@
 
 pkgs.writeShellApplication {
   name = "generate-nails-sbom";
-  runtimeInputs = with pkgs; [ nix jq coreutils gnugrep gawk ];
+  runtimeInputs = with pkgs; [
+    nix
+    jq
+    coreutils
+    gnugrep
+    gawk
+  ];
 
   text = ''
     set -euo pipefail

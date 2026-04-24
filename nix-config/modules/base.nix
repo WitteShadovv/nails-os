@@ -1,13 +1,21 @@
-{ pkgs, lib, ... }: {
+{ pkgs, lib, ... }:
+{
   nix.settings = {
-    experimental-features = [ "nix-command" "flakes" ];
+    experimental-features = [
+      "nix-command"
+      "flakes"
+    ];
     auto-optimise-store = true;
   };
 
-  nixpkgs.config.allowUnfreePredicate = pkg:
-    builtins.elem (lib.getName pkg) [ "veracrypt" ];
+  nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [ "veracrypt" ];
 
   time.timeZone = lib.mkDefault "UTC";
+
+  systemd.settings.Manager = {
+    DefaultTimeoutStopSec = lib.mkDefault "5s";
+    DefaultTimeoutStartSec = lib.mkDefault "5s";
+  };
 
   i18n = {
     defaultLocale = lib.mkDefault "en_US.UTF-8";

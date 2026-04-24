@@ -1,0 +1,119 @@
+name: Build NAILS OS ISO (PR trusted metadata gate)
+
+on:
+  pull_request_target:
+    branches: [main]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - ready_for_review
+    paths:
+      - 'nix-config/**'
+      - '.github/workflows/build-iso.yml'
+      - '.github/workflows/build-iso-pr.yml'
+      - '.github/workflows/build-iso-main.yml'
+      - '.github/workflows/build-iso-pr-safe.yml'
+      - '.github/workflows/build-iso-pr-approved.yml'
+      - '.github/workflows/build-iso-pr-trusted.yml'
+      - '.github/workflows/release.yml'
+      - '.pre-commit-config.yaml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: build-iso-pr-trusted-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  approve-pr:
+    name: Await Hetzner PR approval
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: hetzner-pr
+    steps:
+      - name: Record approval gate context
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 <<'PY'
+          import os
+          import urllib.request
+          import json
+
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          token = os.environ["GITHUB_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          pr_number = os.environ["PR_NUMBER"]
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+
+          def api_get(path):
+              request = urllib.request.Request(
+                  f"{api_url}{path}",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          if not pr_number.isdigit():
+              raise SystemExit(f"Invalid pull request number: {pr_number!r}")
+
+          pr = api_get(f"/repos/{repo}/pulls/{pr_number}")
+          if pr["state"] != "open":
+              raise SystemExit(f"PR #{pr_number} is no longer open.")
+          if pr["base"]["ref"] != "main":
+              raise SystemExit(f"PR #{pr_number} no longer targets main.")
+
+          with open(summary_path, "a", encoding="utf-8") as summary:
+              summary.write("## Hetzner PR approval\n\n")
+              summary.write("This workflow is metadata-only. It never checks out, dispatches, or executes PR code.\n\n")
+              summary.write("| Property | Value |\n")
+              summary.write("|---|---|\n")
+              summary.write(f"| PR | `#{pr_number}` |\n")
+              summary.write(f"| Head repository | `{pr['head']['repo']['full_name']}` |\n")
+              summary.write(f"| Head ref | `{pr['head']['ref']}` |\n")
+              summary.write(f"| Head SHA | `{pr['head']['sha']}` |\n")
+              summary.write(f"| Base branch | `{pr['base']['ref']}` |\n")
+              summary.write(f"| Base SHA | `{pr['base']['sha']}` |\n")
+              summary.write("\nAfter approval, a maintainer may manually run `build-iso-pr-approved.yml` to start a trusted PR build.\n")
+          PY
+
+  trusted-pr-result:
+    name: Trusted PR ISO result
+    needs: [approve-pr]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check workflow outcome
+        env:
+          APPROVAL_RESULT: ${{ needs.approve-pr.result }}
+        run: |
+          set -euo pipefail
+
+          {
+            cat <<'EOF'
+          ## Trusted PR ISO workflow result
+
+          | Job | Result |
+          |---|---|
+          EOF
+            printf '%s\n' "| Await Hetzner PR approval | \`${APPROVAL_RESULT}\` |"
+            printf '%s\n' "" "This workflow is approval-only. Maintainers must manually run \`build-iso-pr-approved.yml\` for any privileged PR build."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${APPROVAL_RESULT}" != 'success' ]]; then
+            echo "::error::Hetzner PR approval did not complete successfully."
+            exit 1
+          fi
+
+          echo "Trusted PR ISO gate workflow completed successfully without dispatching any child workflow."

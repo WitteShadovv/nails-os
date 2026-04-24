@@ -1,0 +1,29 @@
+name: Repository Cleanliness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-cleanliness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tracked-cleanliness:
+    name: Guard tracked repository junk
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check tracked repository junk
+        run: python3 .github/scripts/check_tracked_cleanliness.py

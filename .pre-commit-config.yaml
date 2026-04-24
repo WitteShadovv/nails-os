@@ -16,12 +16,23 @@ repos:
             rm -f result result-*
             echo "✓ Cleaned up result symlinks"
 
+      - id: tracked-cleanliness-guard
+        name: guard tracked repository junk
+        entry: python3 .github/scripts/check_tracked_cleanliness.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: nixfmt
         name: nixfmt
-        entry: nixfmt
+        entry: nix
         language: system
         files: \.nix$
-        args: ["."]
+        args:
+          - develop
+          - ./nix-config
+          - -c
+          - nixfmt
 
       - id: nix-syntax-check
         name: nix syntax check
@@ -100,11 +111,14 @@ repos:
         name: detect secrets
         entry: detect-secrets-hook
         language: system
-        files: \.nix$
+        types: [text]
+        args:
+          - --exclude-secrets
+          - '^(1de1a9ddba23464d037aea82a16ca6cc800e1b06eda67c8007560ab6c56afdb7|FB5DB77FD5C118B80511ADA8A6310ACC4672475C|2C6106201985B60E6C7AC87323F3D4EA75716059|7F38BBB59D064DBCB3D84D725612B36462313325|abcdefghijklmnopqrstuvwxyz0123456789-)$'
         exclude: '.*/tmp-.*\.nix$'
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
