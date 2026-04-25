@@ -347,7 +347,10 @@ def make_hardware_config(
   fileSystems."/" = {{
     device = "tmpfs";
     fsType = "tmpfs";
-    options = [ "mode=755" "size=4G" ];
+    # Let the kernel size tmpfs relative to RAM. A fixed 4G cap on a no-swap
+    # system makes low-memory machines OOM-kill user sessions before tmpfs
+    # applies pressure naturally.
+    options = [ "mode=755" ];
   }};
 
   fileSystems."/persist" = {{

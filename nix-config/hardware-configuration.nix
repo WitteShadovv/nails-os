@@ -6,7 +6,10 @@
   fileSystems."/" = {
     device = "tmpfs";
     fsType = "tmpfs";
-    options = [ "mode=755" "size=4G" ];
+    # Let the kernel size tmpfs relative to available RAM. A fixed 4G cap on a
+    # no-swap system makes low-memory machines hit the OOM killer before tmpfs
+    # itself back-pressures writes.
+    options = [ "mode=755" ];
   };
 
   fileSystems."/boot" = {

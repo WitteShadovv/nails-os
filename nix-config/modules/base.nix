@@ -12,11 +12,6 @@
 
   time.timeZone = lib.mkDefault "UTC";
 
-  systemd.settings.Manager = {
-    DefaultTimeoutStopSec = lib.mkDefault "5s";
-    DefaultTimeoutStartSec = lib.mkDefault "5s";
-  };
-
   i18n = {
     defaultLocale = lib.mkDefault "en_US.UTF-8";
     supportedLocales = [

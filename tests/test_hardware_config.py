@@ -96,6 +96,12 @@ class TestLuksConfig:
         assert 'device = "tmpfs"' in result
         assert 'fsType = "tmpfs"' in result
 
+    def test_tmpfs_root_has_no_fixed_size_cap(self, sample_modules):
+        result = make_hardware_config(
+            BOOT_UUID, LUKS_UUID, sample_modules, efi_mode=True
+        )
+        assert 'size=' not in result
+
 
 class TestInitrdModules:
     def test_modules_formatted_as_nix_list(self, sample_modules):

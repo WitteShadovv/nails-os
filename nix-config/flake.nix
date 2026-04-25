@@ -218,7 +218,10 @@
           impermanence = pkgs.testers.runNixOSTest {
             name = "nails-impermanence";
             nodes.machine = {
-              fileSystems."/ephemeral" = {
+              # In NixOS VM tests, extra mounts must be declared via
+              # virtualisation.fileSystems so the generated VM layout includes
+              # them in addition to the test root disk.
+              virtualisation.fileSystems."/ephemeral" = {
                 device = "tmpfs";
                 fsType = "tmpfs";
                 options = [
@@ -230,7 +233,7 @@
             testScript = ''
               machine.wait_for_unit("multi-user.target")
               # Verify the tmpfs mount is active
-              machine.succeed("findmnt -n -o FSTYPE /ephemeral | grep -q tmpfs")
+              machine.succeed("findmnt --kernel --types tmpfs /ephemeral")
               # Write a file to the volatile mount
               machine.succeed("echo 'volatile-data' > /ephemeral/testfile")
               machine.succeed("test -f /ephemeral/testfile")
