@@ -253,3 +253,7 @@ NAILS OS is licensed under the **GNU General Public License v3.0**. See [LICENSE
 > This software is provided for educational, testing, and security research purposes. It comes
 > with no warranty, and it should not be treated as a guarantee of anonymity, amnesia, or
 > forensic resistance in any specific threat environment.
+
+## Maintainer
+
+Maintained by [WitteShadovv](https://witteshadovv.dev).
